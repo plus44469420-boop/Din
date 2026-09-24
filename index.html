@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settlement claim desk</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div>
+        <h1>Settlement claim desk</h1>
+        <p class="lede">Open claims sorted by whether proof is required. Continuing past “I’ve been there” only prepares your details. You still submit the official form yourself.</p>
+      </div>
+      <button class="btn primary" id="check-new" type="button">Check for new</button>
+    </header>
+    <section class="stats" aria-label="Summary">
+      <div class="stat"><b id="open-count">0</b><span>Open in the catalog</span></div>
+      <div class="stat"><b id="done-count">0</b><span>Marked submitted</span></div>
+      <div class="stat"><b id="notice-count">0</b><span>Unread new finds</span></div>
+    </section>
+    <nav>
+      <button type="button" data-view="open">No proof</button>
+      <button type="button" data-view="proof">Needs proof</button>
+      <button type="button" data-view="done">Completed</button>
+      <button type="button" data-view="inbox">New</button>
+      <button type="button" data-view="profile">Profile</button>
+      <button type="button" data-view="sources">Sources</button>
+    </nav>
+    <main id="view"></main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
