@@ -1,0 +1,187 @@
+{
+  "updated": "2026-09-24",
+  "sources": [
+    {
+      "name": "r/classactions",
+      "url": "https://www.reddit.com/r/classactions/",
+      "role": "Main community source. Read the sidebar and posts for newly opened claims and which listing sites people actually use."
+    },
+    {
+      "name": "Top Class Actions",
+      "url": "https://topclassactions.com/category/lawsuit-settlements/open-lawsuit-settlements/",
+      "role": "Most-recommended listing site in the subreddit. Open settlements and links toward administrator pages."
+    },
+    {
+      "name": "ClassAction.org",
+      "url": "https://www.classaction.org/settlements",
+      "role": "Second site the subreddit repeatedly names for open settlements and newsletters."
+    },
+    {
+      "name": "OpenClassActions",
+      "url": "https://openclassactions.com/",
+      "role": "Recommended when people want a list that calls out no-proof claims."
+    },
+    {
+      "name": "ClaimDepot",
+      "url": "https://www.claimdepot.com/settlements",
+      "role": "Recommended because each write-up links to the official settlement website and claim form."
+    },
+    {
+      "name": "Settlement Pulse",
+      "url": "https://settlementpulse.com/",
+      "role": "Cross-check for deadlines, payout ranges, and whether proof is required. Confirm every claim on the official administrator site before you file."
+    }
+  ],
+  "settlements": [
+    {
+      "id": "atrium-health-2026",
+      "name": "Atrium Health",
+      "payout": "Up to $10",
+      "deadline": "2026-09-28",
+      "proofRequired": false,
+      "category": "Privacy",
+      "classDefinition": "MyAtriumHealth or MyCarolinas portal users affected by patient-data tracking pixels.",
+      "listingUrl": "https://topclassactions.com/?s=Atrium+Health+settlement"
+    },
+    {
+      "id": "xactus-credit-plus-2026",
+      "name": "Xactus / Credit Plus",
+      "payout": "About $500",
+      "deadline": "2026-09-29",
+      "proofRequired": false,
+      "category": "Credit",
+      "classDefinition": "People whose consumer report was shared without proper consent between 2021 and 2026.",
+      "listingUrl": "https://topclassactions.com/?s=Xactus+Credit+Plus+settlement"
+    },
+    {
+      "id": "lifestance-2026",
+      "name": "LifeStance Health",
+      "payout": "Pro rata share of $3.03 million",
+      "deadline": "2026-09-29",
+      "proofRequired": false,
+      "category": "Privacy",
+      "classDefinition": "Patients affected by website tracking pixels on LifeStance's site.",
+      "listingUrl": "https://www.classaction.org/settlements"
+    },
+    {
+      "id": "google-play-2026",
+      "name": "Google Play",
+      "payout": "$2 – $300",
+      "deadline": "2026-09-30",
+      "proofRequired": false,
+      "category": "Consumer",
+      "classDefinition": "Consumers who bought apps or in-app items covered by the Google Play state attorneys general settlement.",
+      "listingUrl": "https://topclassactions.com/?s=Google+Play+settlement"
+    },
+    {
+      "id": "bayhealth-2026",
+      "name": "Bayhealth",
+      "payout": "$25 plus privacy monitoring",
+      "deadline": "2026-10-05",
+      "proofRequired": false,
+      "category": "Privacy",
+      "classDefinition": "Website and portal users affected by Bayhealth tracking pixels.",
+      "listingUrl": "https://www.claimdepot.com/settlements"
+    },
+    {
+      "id": "flo-health-2026",
+      "name": "Flo Health / Google",
+      "payout": "Share of $59.5 million",
+      "deadline": "2026-10-15",
+      "proofRequired": false,
+      "category": "Privacy",
+      "classDefinition": "Flo app users covered by the Flo Health and Google privacy settlement.",
+      "listingUrl": "https://topclassactions.com/?s=Flo+Health+settlement"
+    },
+    {
+      "id": "toyota-2026",
+      "name": "Toyota",
+      "payout": "Varies",
+      "deadline": "2026-12-16",
+      "proofRequired": true,
+      "category": "Auto",
+      "classDefinition": "Owners or lessees of covered Toyota vehicles. This claim asks for proof of ownership or the qualifying repair.",
+      "listingUrl": "https://topclassactions.com/?s=Toyota+settlement"
+    },
+    {
+      "id": "cash-app-2026",
+      "name": "Cash App",
+      "payout": "Share of $120 million",
+      "deadline": "2026-12-31",
+      "proofRequired": false,
+      "category": "Finance",
+      "classDefinition": "Cash App account holders included in the settlement class for the covered period.",
+      "listingUrl": "https://www.classaction.org/settlements"
+    },
+    {
+      "id": "hyundai-kia-theft-2027",
+      "name": "Hyundai & Kia theft",
+      "payout": "$150 – $350",
+      "deadline": "2027-03-29",
+      "proofRequired": true,
+      "category": "Auto",
+      "classDefinition": "Owners of covered Hyundai or Kia vehicles. Proof of ownership and, for higher amounts, proof of a qualifying loss.",
+      "listingUrl": "https://topclassactions.com/?s=Hyundai+Kia+settlement"
+    },
+    {
+      "id": "hyundai-kia-loss-2027",
+      "name": "Hyundai & Kia documented loss",
+      "payout": "$375 – $4,500",
+      "deadline": "2027-03-31",
+      "proofRequired": true,
+      "category": "Auto",
+      "classDefinition": "Owners with documented theft-related losses on covered Hyundai or Kia vehicles. Receipts or insurance records are required.",
+      "listingUrl": "https://openclassactions.com/"
+    },
+    {
+      "id": "amazon-prime-2027",
+      "name": "Amazon Prime",
+      "payout": "Share of $1.5 billion in refunds",
+      "deadline": "2027-03-31",
+      "proofRequired": false,
+      "category": "Consumer",
+      "classDefinition": "Amazon customers enrolled in a covered subscription or membership during the class period.",
+      "listingUrl": "https://topclassactions.com/?s=Amazon+Prime+settlement"
+    },
+    {
+      "id": "visa-mastercard-2027",
+      "name": "Visa & Mastercard",
+      "payout": "Share of $5.6 billion",
+      "deadline": "2027-05-31",
+      "proofRequired": false,
+      "category": "Payments",
+      "classDefinition": "Merchants that accepted Visa or Mastercard during the class period. This is a merchant claim, not a shopper claim.",
+      "listingUrl": "https://www.claimdepot.com/settlements"
+    },
+    {
+      "id": "penn-medicine-2026",
+      "name": "Penn Medicine",
+      "payout": "Up to $15",
+      "deadline": "2026-09-16",
+      "proofRequired": false,
+      "category": "Privacy",
+      "classDefinition": "myPennMedicine portal users between 2021 and 2023.",
+      "listingUrl": "https://topclassactions.com/?s=Penn+Medicine+settlement"
+    },
+    {
+      "id": "circle-k-2026",
+      "name": "Circle K / Gas Express",
+      "payout": "$50 – $2,000",
+      "deadline": "2026-09-03",
+      "proofRequired": false,
+      "category": "Data breach",
+      "classDefinition": "People notified about the Circle K or Gas Express data breach. Higher amounts need documented losses.",
+      "listingUrl": "https://www.classaction.org/settlements"
+    },
+    {
+      "id": "comcast-2026",
+      "name": "Comcast (Xfinity)",
+      "payout": "$50 – $10,000",
+      "deadline": "2026-09-14",
+      "proofRequired": false,
+      "category": "Data breach",
+      "classDefinition": "Xfinity customers affected by the covered data breach. Larger payments require proof of loss.",
+      "listingUrl": "https://topclassactions.com/?s=Xfinity+settlement"
+    }
+  ]
+}
