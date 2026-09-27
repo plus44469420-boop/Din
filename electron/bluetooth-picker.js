@@ -125,4 +125,84 @@ function attachBluetoothPicker(contents) {
   });
 }
 
-module.exports = { attachBluetoothPicker };
+const PAIRING_HTML = path.join(__dirname, 'pairing.html');
+const pendingPairing = new Map();
+let pairingIpcReady = false;
+
+function ensurePairingIpc() {
+  if (pairingIpcReady) return;
+  pairingIpcReady = true;
+  ipcMain.on('pairing-submit', (event, response) => {
+    const resolve = pendingPairing.get(event.sender.id);
+    if (!resolve) return;
+    pendingPairing.delete(event.sender.id);
+    const confirmed = Boolean(response && response.confirmed);
+    const pin = response && typeof response.pin === 'string' ? response.pin : '';
+    resolve(confirmed ? { confirmed: true, pin } : { confirmed: false });
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.close();
+  });
+}
+
+function promptBluetoothPairing(details) {
+  ensurePairingIpc();
+  return new Promise((resolve) => {
+    const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const win = new BrowserWindow({
+      parent: parent || undefined,
+      modal: Boolean(parent),
+      width: 360,
+      height: details.pairingKind === 'providePin' ? 280 : 230,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: 'Bluetooth pairing',
+      backgroundColor: '#141414',
+      autoHideMenuBar: true,
+      show: false,
+      icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'pairing-preload.js'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    });
+    const contentsId = win.webContents.id;
+    let settled = false;
+    const finish = (response) => {
+      if (settled) return;
+      settled = true;
+      pendingPairing.delete(contentsId);
+      resolve(response);
+    };
+    pendingPairing.set(contentsId, (response) => finish(response));
+    win.setMenuBarVisibility(false);
+    win.once('ready-to-show', () => {
+      if (!win.isDestroyed()) win.show();
+    });
+    win.webContents.on('did-finish-load', () => {
+      if (win.isDestroyed()) return;
+      win.webContents.send('pairing-details', {
+        pairingKind: details.pairingKind,
+        pin: details.pin || '',
+      });
+    });
+    win.on('closed', () => finish({ confirmed: false }));
+    win.loadFile(PAIRING_HTML);
+  });
+}
+
+function attachBluetoothPairing(ses) {
+  ses.setBluetoothPairingHandler((details, callback) => {
+    promptBluetoothPairing(details)
+      .then((response) => callback(response))
+      .catch((error) => {
+        console.error('Bluetooth pairing prompt failed', error);
+        callback({ confirmed: false });
+      });
+  });
+}
+
+module.exports = { attachBluetoothPicker, attachBluetoothPairing };

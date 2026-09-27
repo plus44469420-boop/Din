@@ -1,6 +1,6 @@
 const path = require('path');
 const { app, BrowserWindow, Menu, session } = require('electron');
-const { attachBluetoothPicker } = require('./bluetooth-picker');
+const { attachBluetoothPairing, attachBluetoothPicker } = require('./bluetooth-picker');
 const { configureSession } = require('./configure-session');
 const {
   DEFAULT_CONTENT_SIZE,
@@ -15,9 +15,15 @@ app.setName('Puffco');
 app.userAgentFallback = IPHONE_WEBVIEW_UA;
 
 // Web Bluetooth is how the page talks to Puffco hardware.
+// The new permissions backend exposes getDevices() so a device the user
+// already allowed can reconnect without another chooser.
 // Third-party cookie partitioning is left off so Google and Apple sign-in
 // can keep their session inside the window.
-app.commandLine.appendSwitch('enable-features', 'WebBluetooth');
+app.commandLine.appendSwitch(
+  'enable-features',
+  'WebBluetooth,WebBluetoothNewPermissionsBackend',
+);
+app.commandLine.appendSwitch('enable-experimental-web-platform-features');
 app.commandLine.appendSwitch(
   'disable-features',
   'ThirdPartyStoragePartitioning,BlockThirdPartyCookies',
@@ -93,9 +99,6 @@ function attachContents(contents) {
   if (contents.session !== session.fromPartition(PARTITION)) return;
 
   contents.setUserAgent(IPHONE_WEBVIEW_UA);
-  contents.on('page-title-updated', (event) => {
-    event.preventDefault();
-  });
   try {
     const zoom = contents.setVisualZoomLevelLimits(1, 1);
     if (zoom && typeof zoom.catch === 'function') zoom.catch(() => {});
@@ -117,7 +120,14 @@ function attachContents(contents) {
 if (gotLock) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
-    configureSession(session.fromPartition(PARTITION), IPHONE_WEBVIEW_UA);
+    const appSession = session.fromPartition(PARTITION);
+    configureSession(appSession, IPHONE_WEBVIEW_UA);
+    attachBluetoothPairing(appSession);
+    app.on('browser-window-created', (_event, win) => {
+      win.on('page-title-updated', (event) => {
+        event.preventDefault();
+      });
+    });
     app.on('web-contents-created', (_event, contents) => {
       attachContents(contents);
     });
