@@ -1,51 +1,10 @@
 {
   "name": "puffco-desktop",
-  "productName": "Puffco",
   "version": "1.0.0",
   "private": true,
-  "description": "Desktop window for the Puffco app at https://www.puffco.app/",
-  "main": "electron/main.js",
+  "description": "Desktop website that serves the live Puffco app.",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "test": "node --test electron/link-policy.test.js",
-    "build:win": "electron-builder --win nsis portable"
-  },
-  "devDependencies": {
-    "electron": "44.4.5",
-    "electron-builder": "26.15.3"
-  },
-  "build": {
-    "appId": "app.puffco.desktop",
-    "productName": "Puffco",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "electron/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "win": {
-      "icon": "assets/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Puffco"
-    },
-    "portable": {
-      "artifactName": "${productName}-${version}-portable.exe"
-    }
+    "start": "node server.js",
+    "dev": "node server.js"
   }
 }
