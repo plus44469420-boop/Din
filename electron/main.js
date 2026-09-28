@@ -50,6 +50,15 @@ function configureSession(ses) {
 const pickerOwners = new Map();
 let pickerIpcReady = false;
 
+function safeInvoke(callback, deviceId) {
+  if (typeof callback !== 'function') return;
+  try {
+    callback(deviceId);
+  } catch (error) {
+    console.error('Bluetooth chooser callback failed', error);
+  }
+}
+
 function ensurePickerIpc() {
   if (pickerIpcReady) return;
   pickerIpcReady = true;
@@ -58,8 +67,10 @@ function ensurePickerIpc() {
     if (!state) return;
     const callback = state.callback;
     state.callback = null;
-    if (state.win && !state.win.isDestroyed()) state.win.close();
-    if (callback) callback(deviceId);
+    state.suppressCancel = true;
+    safeInvoke(callback, deviceId);
+    const win = state.win;
+    if (win && !win.isDestroyed()) win.close();
   };
   ipcMain.on('bluetooth-select', (event, deviceId) => {
     finish(event.sender.id, typeof deviceId === 'string' ? deviceId : '');
@@ -69,10 +80,18 @@ function ensurePickerIpc() {
 
 function attachBluetooth(contents) {
   ensurePickerIpc();
-  const state = { callback: null, win: null, devices: [] };
+    const state = { callback: null, win: null, devices: [], opening: false, suppressCancel: false };
   const send = () => {
-    if (!state.win || state.win.isDestroyed() || state.win.webContents.isLoading()) return;
-    state.win.webContents.send(
+    const win = state.win;
+    if (!win || win.isDestroyed()) return;
+    let pickerContents;
+    try {
+      pickerContents = win.webContents;
+    } catch {
+      return;
+    }
+    if (!pickerContents || pickerContents.isDestroyed() || pickerContents.isLoading()) return;
+    pickerContents.send(
       'bluetooth-devices',
       state.devices.map((device) => ({
         deviceId: device.deviceId,
@@ -80,26 +99,25 @@ function attachBluetooth(contents) {
       })),
     );
   };
-  contents.on('select-bluetooth-device', (event, deviceList, callback) => {
-    event.preventDefault();
-    state.callback = callback;
-    state.devices = deviceList || [];
+  const openPicker = () => {
+    if (contents.isDestroyed()) return;
     if (state.win && !state.win.isDestroyed()) {
       send();
-      state.win.focus();
       return;
     }
-    const parent = BrowserWindow.fromWebContents(contents);
+    // Not modal and not a child window. A modal chooser is destroyed while
+    // the scan is still running, and touching it crashes the main process.
     const win = new BrowserWindow({
-      parent: parent || undefined,
-      modal: Boolean(parent),
       width: 360,
       height: 480,
       resizable: false,
+      minimizable: false,
+      maximizable: false,
       title: 'Connect a device',
       backgroundColor: '#141414',
       autoHideMenuBar: true,
       show: false,
+      alwaysOnTop: true,
       webPreferences: {
         preload: path.join(__dirname, 'picker-preload.js'),
         nodeIntegration: false,
@@ -107,20 +125,41 @@ function attachBluetooth(contents) {
         sandbox: true,
       },
     });
-    pickerOwners.set(win.webContents.id, state);
+    const pickerId = win.webContents.id;
+    pickerOwners.set(pickerId, state);
     state.win = win;
-    win.once('ready-to-show', () => win.show());
+    state.suppressCancel = false;
+    win.once('ready-to-show', () => {
+      if (!win.isDestroyed()) win.show();
+    });
     win.webContents.on('did-finish-load', send);
+    win.on('close', () => {
+      if (state.suppressCancel) return;
+      const callback = state.callback;
+      state.callback = null;
+      safeInvoke(callback, '');
+    });
     win.on('closed', () => {
-      pickerOwners.delete(win.webContents.id);
-      if (state.callback) {
-        const callback = state.callback;
-        state.callback = null;
-        callback('');
-      }
-      state.win = null;
+      pickerOwners.delete(pickerId);
+      if (state.win === win) state.win = null;
     });
     win.loadFile(path.join(__dirname, 'picker.html'));
+  };
+  contents.on('select-bluetooth-device', (event, deviceList, callback) => {
+    event.preventDefault();
+    state.callback = callback;
+    state.devices = deviceList || [];
+    if (state.win && !state.win.isDestroyed()) {
+      send();
+      if (!state.win.isDestroyed()) state.win.focus();
+      return;
+    }
+    if (state.opening) return;
+    state.opening = true;
+    setImmediate(() => {
+      state.opening = false;
+      openPicker();
+    });
   });
 }
 
@@ -138,6 +177,7 @@ function createWindow(port) {
   });
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => {
+    if (win.isDestroyed()) return;
     win.maximize();
     win.show();
   });
@@ -153,6 +193,7 @@ if (gotLock) {
     const { port } = await startServer(PORT);
     const win = createWindow(port);
     app.on('second-instance', () => {
+      if (win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();
       win.focus();
     });

@@ -1,7 +1,7 @@
 {
   "name": "puffco-desktop",
   "productName": "Puffco",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Desktop website that serves the live Puffco app.",
   "main": "electron/main.js",
