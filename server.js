@@ -37,6 +37,19 @@ function rewriteLocation(location) {
   return location.replace(/^https:\/\/(?:www\.)?puffco\.app(?=\/|$)/i, '');
 }
 
+// Desktop windows are often shorter than a pairing sheet that sizes itself
+// to the viewport. The sheet then clips the pair control and the page cannot
+// scroll. Let those sheets scroll instead of rebuilding the screen.
+const SCROLL_STYLE = `<style id="puffco-desktop-scroll">
+[style*="max-height:"][style*="border-top-left-radius"]{overflow-y:auto !important}
+</style>`;
+
+function injectScrollStyle(html) {
+  if (html.includes('puffco-desktop-scroll')) return html;
+  if (html.includes('</head>')) return html.replace('</head>', `${SCROLL_STYLE}</head>`);
+  return `${SCROLL_STYLE}${html}`;
+}
+
 function proxy(clientReq, clientRes) {
   const path = clientReq.url || '/';
   if (!path.startsWith('/')) {
@@ -51,6 +64,9 @@ function proxy(clientReq, clientRes) {
     headers[name] = value;
   }
   headers.host = UPSTREAM_HOST;
+  if (String(headers.accept || '').includes('text/html')) {
+    headers['accept-encoding'] = 'identity';
+  }
 
   const upstreamReq = https.request(
     {
@@ -76,8 +92,23 @@ function proxy(clientReq, clientRes) {
         }
         out[name] = value;
       }
-      clientRes.writeHead(upstreamRes.statusCode || 502, out);
-      upstreamRes.pipe(clientRes);
+      const contentType = String(upstreamRes.headers['content-type'] || '');
+      if (!/text\/html/i.test(contentType)) {
+        clientRes.writeHead(upstreamRes.statusCode || 502, out);
+        upstreamRes.pipe(clientRes);
+        return;
+      }
+
+      const chunks = [];
+      upstreamRes.on('data', (chunk) => chunks.push(chunk));
+      upstreamRes.on('end', () => {
+        const body = Buffer.from(injectScrollStyle(Buffer.concat(chunks).toString('utf8')));
+        delete out['content-length'];
+        delete out['content-encoding'];
+        out['content-length'] = String(body.length);
+        if (!clientRes.headersSent) clientRes.writeHead(upstreamRes.statusCode || 502, out);
+        clientRes.end(body);
+      });
     },
   );
 
@@ -93,8 +124,31 @@ function proxy(clientReq, clientRes) {
   clientReq.pipe(upstreamReq);
 }
 
-const server = http.createServer(proxy);
+function startServer(port = PORT) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(proxy);
+    server.once('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        resolve({ port, alreadyRunning: true });
+        return;
+      }
+      reject(error);
+    });
+    server.listen(port, '127.0.0.1', () => {
+      resolve({ port, alreadyRunning: false, server });
+    });
+  });
+}
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Puffco desktop site at http://127.0.0.1:${PORT}/`);
-});
+if (require.main === module) {
+  startServer()
+    .then(({ port }) => {
+      console.log(`Puffco desktop site at http://127.0.0.1:${port}/`);
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
+}
+
+module.exports = { startServer, PORT, injectScrollStyle };
