@@ -19,6 +19,6 @@ npm install
 npm run build:win
 ```
 
-The portable exe is written to `dist/Puffco-1.0.1-portable.exe`. It opens the same desktop site in a full window, with the same scroll behavior and standard Web Bluetooth.
+The portable exe is written to `dist/Puffco-1.0.2-portable.exe`. It opens the same desktop site in a full window, with the same scroll behavior and standard Web Bluetooth.
 
 On Windows the command also writes an NSIS installer. On Linux the installer step needs Wine; the portable exe is still produced.

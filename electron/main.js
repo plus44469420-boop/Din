@@ -23,6 +23,7 @@ if (!gotLock) app.quit();
 function webPreferences() {
   return {
     partition: PARTITION,
+    preload: path.join(__dirname, 'shell-preload.js'),
     nodeIntegration: false,
     contextIsolation: true,
     sandbox: true,
@@ -39,16 +40,20 @@ function configureSession(ses) {
   });
   ses.setDevicePermissionHandler((details) => details.deviceType === 'bluetooth');
   ses.setBluetoothPairingHandler((details, callback) => {
-    if (details.pairingKind === 'confirm' || details.pairingKind === 'confirmPin') {
-      callback({ confirmed: true });
-      return;
+    try {
+      if (details.pairingKind === 'confirm' || details.pairingKind === 'confirmPin') {
+        callback({ confirmed: true });
+        return;
+      }
+      callback({ confirmed: false });
+    } catch (error) {
+      console.error('Bluetooth pairing handler failed', error);
     }
-    callback({ confirmed: false });
   });
 }
 
-const pickerOwners = new Map();
-let pickerIpcReady = false;
+const choosers = new Map();
+let chooserIpcReady = false;
 
 function safeInvoke(callback, deviceId) {
   if (typeof callback !== 'function') return;
@@ -59,107 +64,70 @@ function safeInvoke(callback, deviceId) {
   }
 }
 
-function ensurePickerIpc() {
-  if (pickerIpcReady) return;
-  pickerIpcReady = true;
-  const finish = (senderId, deviceId) => {
-    const state = pickerOwners.get(senderId);
-    if (!state) return;
-    const callback = state.callback;
-    state.callback = null;
-    state.suppressCancel = true;
-    safeInvoke(callback, deviceId);
-    const win = state.win;
-    if (win && !win.isDestroyed()) win.close();
-  };
+function sendTo(contents, channel, payload) {
+  if (!contents || contents.isDestroyed()) return;
+  try {
+    contents.send(channel, payload);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function devicePayload(devices) {
+  return (devices || []).map((device) => ({
+    deviceId: device.deviceId,
+    deviceName: device.deviceName || 'Unknown device',
+  }));
+}
+
+function finishChooser(contentsId, deviceId) {
+  const state = choosers.get(contentsId);
+  if (!state) return;
+  const callback = state.callback;
+  state.callback = null;
+  state.devices = [];
+  safeInvoke(callback, deviceId);
+  sendTo(state.contents, 'bluetooth-close');
+}
+
+function ensureChooserIpc() {
+  if (chooserIpcReady) return;
+  chooserIpcReady = true;
   ipcMain.on('bluetooth-select', (event, deviceId) => {
-    finish(event.sender.id, typeof deviceId === 'string' ? deviceId : '');
+    try {
+      finishChooser(event.sender.id, typeof deviceId === 'string' ? deviceId : '');
+    } catch (error) {
+      console.error(error);
+    }
   });
-  ipcMain.on('bluetooth-cancel', (event) => finish(event.sender.id, ''));
+  ipcMain.on('bluetooth-cancel', (event) => {
+    try {
+      finishChooser(event.sender.id, '');
+    } catch (error) {
+      console.error(error);
+    }
+  });
 }
 
 function attachBluetooth(contents) {
-  ensurePickerIpc();
-    const state = { callback: null, win: null, devices: [], opening: false, suppressCancel: false };
-  const send = () => {
-    const win = state.win;
-    if (!win || win.isDestroyed()) return;
-    let pickerContents;
-    try {
-      pickerContents = win.webContents;
-    } catch {
-      return;
-    }
-    if (!pickerContents || pickerContents.isDestroyed() || pickerContents.isLoading()) return;
-    pickerContents.send(
-      'bluetooth-devices',
-      state.devices.map((device) => ({
-        deviceId: device.deviceId,
-        deviceName: device.deviceName || 'Unknown device',
-      })),
-    );
-  };
-  const openPicker = () => {
-    if (contents.isDestroyed()) return;
-    if (state.win && !state.win.isDestroyed()) {
-      send();
-      return;
-    }
-    // Not modal and not a child window. A modal chooser is destroyed while
-    // the scan is still running, and touching it crashes the main process.
-    const win = new BrowserWindow({
-      width: 360,
-      height: 480,
-      resizable: false,
-      minimizable: false,
-      maximizable: false,
-      title: 'Connect a device',
-      backgroundColor: '#141414',
-      autoHideMenuBar: true,
-      show: false,
-      alwaysOnTop: true,
-      webPreferences: {
-        preload: path.join(__dirname, 'picker-preload.js'),
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-      },
-    });
-    const pickerId = win.webContents.id;
-    pickerOwners.set(pickerId, state);
-    state.win = win;
-    state.suppressCancel = false;
-    win.once('ready-to-show', () => {
-      if (!win.isDestroyed()) win.show();
-    });
-    win.webContents.on('did-finish-load', send);
-    win.on('close', () => {
-      if (state.suppressCancel) return;
-      const callback = state.callback;
-      state.callback = null;
-      safeInvoke(callback, '');
-    });
-    win.on('closed', () => {
-      pickerOwners.delete(pickerId);
-      if (state.win === win) state.win = null;
-    });
-    win.loadFile(path.join(__dirname, 'picker.html'));
-  };
+  ensureChooserIpc();
+  const state = { callback: null, devices: [], contents };
+  choosers.set(contents.id, state);
+  const publish = () => sendTo(contents, 'bluetooth-devices', devicePayload(state.devices));
+  contents.on('destroyed', () => {
+    choosers.delete(contents.id);
+    state.callback = null;
+  });
+  contents.on('dom-ready', () => {
+    if (state.callback) publish();
+  });
+  // The device list stays in this window. A second BrowserWindow is destroyed
+  // while the scan is still running, and using it crashes the main process.
   contents.on('select-bluetooth-device', (event, deviceList, callback) => {
     event.preventDefault();
     state.callback = callback;
     state.devices = deviceList || [];
-    if (state.win && !state.win.isDestroyed()) {
-      send();
-      if (!state.win.isDestroyed()) state.win.focus();
-      return;
-    }
-    if (state.opening) return;
-    state.opening = true;
-    setImmediate(() => {
-      state.opening = false;
-      openPicker();
-    });
+    publish();
   });
 }
 
