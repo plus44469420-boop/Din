@@ -1289,7 +1289,10 @@ function cvRenderQueue() {
         el("button", { onclick: () => api("POST", "/api/local/open", { path: r.path.replace(/[\\/][^\\/]+$/, "") }).catch((e) => toast(e.message, "err")) }, "Show in folder"),
         el("button", { class: "primary", disabled: !app.connected, title: app.connected ? "" : "Connect to the PS5 first", onclick: () => cvSend(j) }, "Send to PS5")));
     }
-    if (j.state === "failed") box.append(el("small", { class: "err-text" }, j.error));
+    if (j.state === "failed") {
+      const hint = /already exists/i.test(j.error || "") ? " — delete or rename it, or pick another output folder." : "";
+      box.append(el("small", { class: "err-text" }, j.error + hint));
+    }
     return box;
   });
   right.replaceChildren(run, ...list);
