@@ -342,7 +342,7 @@ def assess(info):
     if link:
         limits.append((f"Ethernet link ({link} Mbps)", ethernet_practical(link)))
     if usb:
-        limits.append((f"USB link ({info['usb_label']})", USB_PRACTICAL_MBPS.get(usb, usb / 8 * 0.6)))
+        limits.append((f"USB link ({info['usb_label'].split(' (')[0]})", USB_PRACTICAL_MBPS.get(usb, usb / 8 * 0.6)))
     name, best = min(limits, key=lambda x: x[1])
     info["expected_mbs"] = round(best, 1)
     info["bottleneck"] = name
