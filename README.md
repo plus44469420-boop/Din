@@ -1,9 +1,12 @@
 # ps5cable
 
-Wired file transfer between a PC and a jailbroken PS5. It has two parts:
+Wired file transfer between a PC and a jailbroken PS5. It has three parts:
 
 - **`payload/ps5cable.elf`**: a small file server that runs on the PS5. You send it to your jailbreak's ELF loader.
-- **`pc/ps5cable.py`**: a command-line client for Windows, macOS, and Linux. It needs only Python 3.8 or newer and has no dependencies.
+- **ps5cable Hub** (`ps5cable-hub.exe`, or `pc/hub.py`): a desktop file hub with your PC's files on one side and the PS5's on the other. You pick what to send and watch it transfer.
+- **`pc/ps5cable.py`**: the same features as a command-line tool for Windows, macOS, and Linux. It needs only Python 3.8 or newer and has no dependencies.
+
+![ps5cable Hub](docs/hub.png)
 
 The two talk over a direct cable from the PC to the PS5, with no router or Wi-Fi involved. On a gigabit link that runs at about 110 MiB/s, which is about 50 GB in 8 minutes.
 
@@ -57,24 +60,38 @@ The PS5 will say there's no internet, which is expected. Switch it back to Wi-Fi
 
 Check the link from the PC with `ping 192.168.88.2`.
 
-### 3. Get `ps5cable.elf`
+### 3. Get the app
 
-Download it from the GitHub Actions artifacts or from a release (the `ps5cable` zip). Or build it yourself, as described in Building below.
+Download **`ps5cable-windows`** from the GitHub Actions artifacts or from a release. It contains `ps5cable-hub.exe` (the desktop app, with the payload built in), `ps5cable.exe` (the command line), and `ps5cable.elf`. You can also build everything yourself, as described in Building below.
 
-## Every session
+## Using ps5cable Hub (the desktop app)
 
 1. Run your jailbreak as usual, so the ELF loader is listening on port **9021**.
-2. Send the payload over the cable:
+2. Double-click **`ps5cable-hub.exe`**. To run from source instead, use `pc\start-hub.bat`, or `python pc/hub.py` on macOS or Linux. It opens in its own window.
+3. Click **Send payload** in the top bar. The PS5 shows *"ps5cable ready on 192.168.88.2:9113"* and the dot next to the IP turns green. If you used a different IP, type it in and click **Connect**, or click **Find PS5**.
+4. Pick what to send:
+   - The **left pane is your PC**. Use the shortcut chips for Home, Desktop, Downloads and each drive letter, double-click folders to open them, and tick the files and folders you want. Shift-click selects a range, and Ctrl-click adds single items.
+   - The **right pane is the PS5**. Its shortcut chips go to `/data`, `/data/homebrew`, USB drives and M.2 storage. Open the folder you want to copy into.
+   - Click **Send to PS5 →**, or just drag the selection from the left pane onto the right one.
+5. The **Transfers** panel shows each job's progress, speed and ETA, with a Cancel button. Folders are copied with everything inside.
+
+Going the other way works the same way: select files on the PS5 side and click **← Copy to PC**, and they land in the folder open on the left. The PS5 pane can also create folders, rename, and delete (with confirmation).
+
+**Skip / resume existing** is on by default. Files already complete on the destination are skipped, and partly copied ones continue from where they stopped, so re-running a cancelled or interrupted transfer only sends what's missing. **Parallel** sets the number of connections (default 4). The app remembers the PS5 IP and the last folder on each side.
+
+About security: the app listens only on `127.0.0.1`, and every request needs a random token created at launch, so other devices and websites can't use it. Closing the window shuts the app down after a few minutes. It stays open while transfers are running, and the ⏻ button quits immediately.
+
+## Using the command line
+
+1. Send the payload over the cable:
 
    ```sh
    python pc/ps5cable.py send-payload payload/ps5cable.elf
    ```
 
-   The PS5 shows *"ps5cable ready on 192.168.88.2:9113"*. If a copy is already running, sending again replaces it.
+   If a copy is already running, sending again replaces it. If you'd rather load it with a payload manager or autoloader, put `ps5cable.elf` wherever that tool expects payloads.
 
-   If you'd rather load it with a payload manager or autoloader, put `ps5cable.elf` wherever that tool expects payloads.
-
-3. Transfer files:
+2. Transfer files:
 
    ```sh
    # upload a folder (recursive), 4 parallel connections
@@ -121,10 +138,18 @@ make -C payload                                       # -> payload/ps5cable.elf
 make -C payload deploy PS5_HOST=192.168.88.2          # build and send to the ELF loader
 ```
 
-`make -C payload host` builds the same server for your PC. The end-to-end tests use that build:
+`make -C payload host` builds the same server for your PC. The end-to-end tests and the Hub tests use that build:
 
 ```sh
 python3 -m unittest discover -s tests -v
+```
+
+To build the Windows executables (CI does the same on `windows-latest`), run this on Windows with `ps5cable.elf` in `payload/`:
+
+```sh
+pip install pyinstaller
+pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
 ```
 
 ## Troubleshooting
