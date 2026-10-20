@@ -20,6 +20,7 @@
 #define P5CX_PROTO_VER    1
 #define P5CX_PORT         9113
 #define P5CX_MAX_PATH     4096
+#define P5CX_MAX_SPEEDTEST (4ULL << 30)
 
 enum {
   CMD_PING     = 1,  /* -> a=proto version, b=len of version string that follows */
@@ -32,6 +33,8 @@ enum {
   CMD_GET      = 8,  /* a=offset -> a=bytes that follow, b=total size */
   CMD_DF       = 9,  /* -> a=free bytes, b=total bytes */
   CMD_SHUTDOWN = 10, /* stop the payload */
+  CMD_SINK     = 11, /* a=bytes the client sends; discarded -> b=elapsed us */
+  CMD_SOURCE   = 12, /* a=bytes -> a=bytes of zeros that follow */
 };
 
 enum {

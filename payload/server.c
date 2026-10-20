@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/socket.h>
@@ -328,6 +329,36 @@ handle_delete(int fd, const char *path, uint8_t flags) {
   return send_ok(fd);
 }
 
+/* The PS5 kernel does not return EXDEV for rename(2) across mounts: it
+ * panics (black screen, power-cord pull). Both ends must be proven to live
+ * on the same device first, and any doubt counts as "different". */
+static int
+same_device(const char *src, const char *dst) {
+  char parent[P5CX_MAX_PATH];
+  struct stat s, d;
+  char *slash;
+
+  if(lstat(src, &s)) {
+    return 0;
+  }
+  if(!lstat(dst, &d)) {
+    return s.st_dev == d.st_dev;
+  }
+  snprintf(parent, sizeof parent, "%s", dst);
+  if(!(slash = strrchr(parent, '/'))) {
+    return 0;
+  }
+  if(slash == parent) {
+    slash[1] = '\0';
+  } else {
+    *slash = '\0';
+  }
+  if(stat(parent, &d)) {
+    return 0;
+  }
+  return s.st_dev == d.st_dev;
+}
+
 static int
 handle_rename(int fd, const char *path, size_t pathlen) {
   size_t srclen = strlen(path);
@@ -337,6 +368,14 @@ handle_rename(int fd, const char *path, size_t pathlen) {
     return send_err(fd, "rename: expected \"src\\0dst\"");
   }
   dst = path + srclen + 1;
+  if(dst[0] != '/') {
+    return send_err(fd, "rename: destination must be absolute: \"%s\"", dst);
+  }
+  if(!same_device(path, dst)) {
+    return send_err(fd, "rename: %s and %s are on different drives (or missing). "
+                    "Moving between drives crashes the PS5, so copy instead.",
+                    path, dst);
+  }
   if(rename(path, dst)) {
     return send_err(fd, "rename: %s -> %s: %s", path, dst, strerror(errno));
   }
@@ -475,6 +514,64 @@ handle_get(int fd, const char *path, uint64_t offset, uint8_t *buf) {
   return 0;
 }
 
+/* Speed tests move bytes over the cable without touching storage, so they
+ * measure the link (cable, adapter, USB port) and nothing else. */
+static uint64_t
+now_us(void) {
+  struct timespec ts;
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
+
+static int
+handle_sink(int fd, uint64_t total, uint8_t *buf) {
+  uint64_t remaining = total, start;
+
+  if(total > P5CX_MAX_SPEEDTEST) {
+    return send_err(fd, "speed test too large");
+  }
+  if(send_ok(fd)) {
+    return -1;
+  }
+  start = now_us();
+  while(remaining) {
+    size_t want = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;
+    ssize_t n = read(fd, buf, want);
+
+    if(n < 0 && errno == EINTR) {
+      continue;
+    }
+    if(n <= 0) {
+      return -1;
+    }
+    remaining -= (uint64_t)n;
+  }
+  return send_res(fd, 0, 0, total, now_us() - start);
+}
+
+static int
+handle_source(int fd, uint64_t total, uint8_t *buf) {
+  uint64_t remaining = total;
+
+  if(total > P5CX_MAX_SPEEDTEST) {
+    return send_err(fd, "speed test too large");
+  }
+  if(send_res(fd, 0, 0, total, 0)) {
+    return -1;
+  }
+  memset(buf, 0, IO_BUF_SIZE);
+  while(remaining) {
+    size_t n = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;
+
+    if(write_full(fd, buf, n)) {
+      return -1;
+    }
+    remaining -= n;
+  }
+  return 0;
+}
+
 static int
 handle_df(int fd, const char *path) {
   struct statvfs sv;
@@ -518,7 +615,8 @@ client_thread(void *arg) {
     }
     path[req.pathlen] = '\0';
 
-    if(req.cmd != CMD_PING && req.cmd != CMD_SHUTDOWN && path[0] != '/') {
+    if(req.cmd != CMD_PING && req.cmd != CMD_SHUTDOWN && req.cmd != CMD_SINK &&
+       req.cmd != CMD_SOURCE && path[0] != '/') {
       if(send_err(fd, "path must be absolute: \"%s\"", path)) {
         break;
       }
@@ -535,6 +633,8 @@ client_thread(void *arg) {
     case CMD_PUT:      rc = handle_put(fd, path, req.flags, req.a, req.b, buf); break;
     case CMD_GET:      rc = handle_get(fd, path, req.a, buf); break;
     case CMD_DF:       rc = handle_df(fd, path); break;
+    case CMD_SINK:     rc = handle_sink(fd, req.a, buf); break;
+    case CMD_SOURCE:   rc = handle_source(fd, req.a, buf); break;
     case CMD_SHUTDOWN:
       send_ok(fd);
       plat_notify("ps5cable stopped");
@@ -620,6 +720,25 @@ announce_addresses(uint16_t port, int notify) {
   return count;
 }
 
+static int g_notify = 1;
+
+/* Puts "PC connected" on the TV when a computer starts talking to us, but
+ * not for every one of the many short connections a client makes. */
+static void
+note_peer(const struct sockaddr_in *peer) {
+  static uint32_t last_ip;
+  static time_t last_seen;
+  time_t now = time(NULL);
+  char ip[INET_ADDRSTRLEN];
+
+  if(g_notify && (peer->sin_addr.s_addr != last_ip || now - last_seen > 600)) {
+    inet_ntop(AF_INET, &peer->sin_addr, ip, sizeof ip);
+    plat_notify("ps5cable: PC connected (%s)", ip);
+  }
+  last_ip = peer->sin_addr.s_addr;
+  last_seen = now;
+}
+
 static int
 serve(uint16_t port) {
   struct sockaddr_in addr = {0};
@@ -647,16 +766,19 @@ serve(uint16_t port) {
 
   for(;;) {
     int bufsize = SOCK_BUF_SIZE, one = 1;
+    struct sockaddr_in peer;
+    socklen_t peerlen = sizeof peer;
     pthread_t thr;
     int conn;
 
-    if((conn = accept(srv, NULL, NULL)) < 0) {
+    if((conn = accept(srv, (struct sockaddr *)&peer, &peerlen)) < 0) {
       if(errno == EINTR) {
         continue;
       }
       plat_log("accept: %s", strerror(errno));
       break;
     }
+    note_peer(&peer);
     setsockopt(conn, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof bufsize);
     setsockopt(conn, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof bufsize);
     setsockopt(conn, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
@@ -676,7 +798,6 @@ serve(uint16_t port) {
 int
 main(int argc, char *argv[]) {
   uint16_t port = P5CX_PORT;
-  int notify = 1;
   pthread_t thr;
   int c;
 
@@ -686,12 +807,12 @@ main(int argc, char *argv[]) {
       port = (uint16_t)atoi(optarg);
       break;
     case 'q':
-      notify = 0;
+      g_notify = 0;
       break;
     default:
       printf("usage: %s [-p PORT] [-q]\n", argv[0]);
       printf("  -p PORT  TCP+UDP port to listen on (default %d)\n", P5CX_PORT);
-      printf("  -q       no on-screen notification at startup\n");
+      printf("  -q       no on-screen notifications\n");
       return EXIT_FAILURE;
     }
   }
@@ -706,7 +827,7 @@ main(int argc, char *argv[]) {
   while(!announce_addresses(port, 0)) {
     sleep(2);
   }
-  announce_addresses(port, notify);
+  announce_addresses(port, g_notify);
 
   if(!pthread_create(&thr, NULL, discovery_thread, (void *)(intptr_t)port)) {
     pthread_detach(thr);
