@@ -1,0 +1,817 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ps5cable Hub</title>
+<style>
+  :root {
+    --bg: #090c13;
+    --panel: #10151f;
+    --panel-2: #151b27;
+    --row-hover: #1a2231;
+    --row-sel: #12305a;
+    --border: #222b3a;
+    --text: #e6eaf2;
+    --muted: #8b95a7;
+    --accent: #2f7cf6;
+    --accent-2: #5a9bff;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+    --radius: 12px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, #13284d 0%, transparent 60%), var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    user-select: none;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    transition: background .12s, border-color .12s, opacity .12s;
+    white-space: nowrap;
+  }
+  button:hover:not(:disabled) { background: #1d2534; border-color: #2e3a4f; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--accent-2); border-color: var(--accent-2); }
+  button.ghost { background: transparent; border-color: transparent; }
+  button.ghost:hover:not(:disabled) { background: var(--panel-2); border-color: var(--border); }
+  button.danger:hover:not(:disabled) { border-color: var(--bad); color: #fecaca; }
+  button.icon { padding: 6px; }
+  input[type=text], input[type=search], input[type=number] {
+    background: #0c111a; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; outline: none;
+  }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #2f7cf633; }
+  svg { width: 16px; height: 16px; flex: none; }
+
+  /* header */
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 12px 18px;
+    border-bottom: 1px solid var(--border); background: #0b1019cc; backdrop-filter: blur(8px);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #2f7cf6, #7c3aed); box-shadow: 0 4px 18px #2f7cf655;
+  }
+  .brand .logo svg { width: 18px; height: 18px; color: #fff; }
+  .brand small { color: var(--muted); font-weight: 500; }
+  .conn {
+    display: flex; align-items: center; gap: 8px; margin-left: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 4px 6px 4px 12px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px #ef444422; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px #22c55e22; }
+  .conn input { width: 140px; border: none; background: transparent; padding: 4px 2px; font-family: var(--mono); }
+  .conn input:focus { box-shadow: none; }
+  .conn .label { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  .meter { display: flex; flex-direction: column; gap: 4px; min-width: 190px; font-size: 12px; color: var(--muted); }
+  .bar { height: 6px; border-radius: 99px; background: #1b2332; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #7c3aed); width: 0; transition: width .3s; }
+
+  /* panes */
+  main { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; padding: 14px 18px; min-height: 0; }
+  .pane {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    display: grid; grid-template-rows: auto auto auto 1fr auto; min-height: 0; overflow: hidden;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .pane.drop { border-color: var(--accent); box-shadow: 0 0 0 4px #2f7cf633 inset; }
+  .pane-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
+  .pane-head h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .pane-head h2 svg { width: 18px; height: 18px; color: var(--accent-2); }
+  .pane-head .free { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .places { display: flex; gap: 6px; padding: 0 14px 8px; overflow-x: auto; scrollbar-width: none; }
+  .places::-webkit-scrollbar { display: none; }
+  .chip {
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; background: #0c111a; color: var(--muted);
+  }
+  .chip.active, .chip:hover { color: var(--text); border-color: #34445e; }
+  .toolbar { display: flex; gap: 6px; padding: 0 14px 10px; align-items: center; }
+  .crumbs {
+    flex: 1; display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden;
+    background: #0c111a; border: 1px solid var(--border); border-radius: 8px; padding: 3px 6px; cursor: text;
+  }
+  .crumbs button { padding: 2px 6px; border: none; background: transparent; border-radius: 6px; color: var(--muted); font-size: 13px; }
+  .crumbs button:hover { background: var(--panel-2); color: var(--text); }
+  .crumbs button:last-child { color: var(--text); font-weight: 600; }
+  .crumbs .sep { color: #3b475b; }
+  .crumbs input { flex: 1; border: none; background: transparent; padding: 3px 4px; font-family: var(--mono); font-size: 13px; }
+  .crumbs input:focus { box-shadow: none; }
+  .filter { width: 150px; }
+
+  .list { overflow: auto; min-height: 0; border-top: 1px solid var(--border); position: relative; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  thead th {
+    position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 600;
+    color: var(--muted); font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  thead th.sorted { color: var(--text); }
+  th.cb, td.cb { width: 38px; text-align: center; padding-left: 12px; }
+  th.size, td.size { width: 96px; text-align: right; }
+  th.date, td.date { width: 156px; }
+  tbody tr { cursor: default; }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.sel { background: var(--row-sel); }
+  td { padding: 6px 10px; border-bottom: 1px solid #161d2a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td.size, td.date { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  td.name { display: flex; align-items: center; gap: 8px; }
+  td.name span { overflow: hidden; text-overflow: ellipsis; }
+  td.name svg { color: #94a3b8; }
+  tr.dir td.name svg { color: #f7c948; }
+  tr.hidden-file { opacity: .55; }
+  input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  .pane-foot {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); font-size: 13px;
+  }
+  .pane-foot .grow { flex: 1; }
+
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 30px; text-align: center; color: var(--muted); }
+  .empty .card { max-width: 380px; display: grid; gap: 12px; justify-items: center; }
+  .empty h3 { margin: 0; color: var(--text); font-size: 16px; }
+  .empty ol { text-align: left; margin: 0; padding-left: 20px; line-height: 1.8; }
+  .empty .big { width: 46px; height: 46px; color: #3b475b; }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; background: #10151f99; }
+  .spin { width: 26px; height: 26px; border: 3px solid #2a3446; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* center rail */
+  .rail { display: flex; flex-direction: column; justify-content: center; gap: 12px; width: 150px; }
+  .rail button { justify-content: center; padding: 12px; border-radius: 12px; flex-direction: column; gap: 4px; }
+  .rail button svg { width: 22px; height: 22px; }
+  .rail button small { font-weight: 400; opacity: .85; font-size: 11px; }
+  .rail .opts { display: grid; gap: 8px; font-size: 12px; color: var(--muted); padding: 10px; border: 1px dashed var(--border); border-radius: 12px; }
+  .rail .opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .rail .opts input[type=number] { width: 52px; padding: 3px 6px; }
+
+  /* transfers */
+  .transfers { border-top: 1px solid var(--border); background: #0b1019; max-height: 34vh; display: grid; grid-template-rows: auto 1fr; }
+  .transfers.collapsed .jobs { display: none; }
+  .tx-head { display: flex; align-items: center; gap: 10px; padding: 8px 18px; }
+  .tx-head h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .badge { background: var(--accent); color: #fff; border-radius: 999px; font-size: 11px; padding: 1px 8px; font-weight: 700; }
+  .jobs { overflow: auto; padding: 0 18px 12px; display: grid; gap: 8px; }
+  .job { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+  .job-top { display: flex; align-items: center; gap: 10px; }
+  .job-top .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .job-top .dir { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #1b2a44; color: #9cc2ff; font-weight: 700; }
+  .job-top .dir.down { background: #1d3326; color: #86efac; }
+  .job .meta { display: flex; gap: 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .job .meta .state-done { color: var(--ok); }
+  .job .meta .state-failed { color: var(--bad); }
+  .job .meta .state-cancelled { color: var(--warn); }
+  .job .bar { height: 8px; }
+  .job.done .bar > i { background: var(--ok); }
+  .job.failed .bar > i { background: var(--bad); }
+  .job details { font-size: 12px; color: #fca5a5; }
+  .job details pre { margin: 6px 0 0; white-space: pre-wrap; font-family: var(--mono); max-height: 120px; overflow: auto; }
+  .no-jobs { color: var(--muted); font-size: 13px; padding: 4px 0 8px; }
+
+  /* toasts & modal */
+  .toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 50; }
+  .toast {
+    background: #121a28; border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: 10px; padding: 10px 14px; max-width: 420px; box-shadow: 0 10px 30px #0008; animation: in .18s ease-out;
+  }
+  .toast.err { border-left-color: var(--bad); }
+  .toast.ok { border-left-color: var(--ok); }
+  @keyframes in { from { transform: translateY(8px); opacity: 0; } }
+  .modal-bg { position: fixed; inset: 0; background: #0009; display: grid; place-items: center; z-index: 40; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: 420px; display: grid; gap: 14px; box-shadow: 0 20px 60px #000a; }
+  .modal h3 { margin: 0; }
+  .modal p { margin: 0; color: var(--muted); word-break: break-all; white-space: pre-line; }
+  button.primary.danger { background: var(--bad); border-color: var(--bad); }
+  button.primary.danger:hover:not(:disabled) { background: #f87171; border-color: #f87171; color: #fff; }
+  .modal .row { display: flex; justify-content: flex-end; gap: 8px; }
+  .modal input { width: 100%; }
+  .found { display: grid; gap: 6px; }
+  .found button { justify-content: space-between; }
+  .found code { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0l-3-3m3 3l-3 3"/></svg></div>
+    <div>ps5cable Hub <small>PC ⇄ PS5</small></div>
+  </div>
+  <div class="conn" title="PS5 address on the direct cable">
+    <span class="dot" id="dot"></span>
+    <span class="label">PS5</span>
+    <input id="host" type="text" spellcheck="false" placeholder="192.168.88.2">
+    <button class="primary" id="btn-connect">Connect</button>
+  </div>
+  <button class="ghost" id="btn-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find PS5</button>
+  <button class="ghost" id="btn-payload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>Send payload</button>
+  <div class="spacer"></div>
+  <div class="meter" id="ps5-meter" hidden>
+    <div><span id="ps5-banner"></span></div>
+    <div class="bar"><i id="ps5-used"></i></div>
+    <div id="ps5-free"></div>
+  </div>
+  <button class="ghost icon" id="btn-quit" title="Quit ps5cable Hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 6.3a8 8 0 1011.4 0"/></svg></button>
+</header>
+
+<main>
+  <section class="pane" id="pane-local"></section>
+  <div class="rail">
+    <button class="primary" id="btn-upload" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14m-5-5l5 5-5 5"/></svg>
+      Send to PS5<small id="up-sum">select files on the PC</small>
+    </button>
+    <button id="btn-download" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 12H5m5 5l-5-5 5-5"/></svg>
+      Copy to PC<small id="down-sum">select files on the PS5</small>
+    </button>
+    <div class="opts">
+      <label title="Skip files that are already complete and continue partial ones"><input type="checkbox" id="opt-resume"> Skip / resume existing</label>
+      <label title="Parallel connections. More helps with many small files">Parallel <input type="number" id="opt-jobs" min="1" max="16"></label>
+      <label><input type="checkbox" id="opt-hidden"> Show hidden</label>
+    </div>
+  </div>
+  <section class="pane" id="pane-remote"></section>
+</main>
+
+<section class="transfers" id="transfers">
+  <div class="tx-head">
+    <h3>Transfers</h3><span class="badge" id="tx-badge" hidden>0</span>
+    <div class="spacer"></div>
+    <button class="ghost" id="btn-clear">Clear finished</button>
+    <button class="ghost icon" id="btn-collapse" title="Collapse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="jobs" id="jobs"></div>
+</section>
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+const TOKEN = "__HUB_TOKEN__";
+
+const ICONS = {
+  pc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  ps5: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3c3 1 5 3 5 6v12M9 3v14l-5-2M14 13l6 2-6 3"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>',
+  file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-6 6l6-6 6 6"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/></svg>',
+  newdir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2zM12 10v6m-3-3h6"/></svg>',
+  rename: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13h8l1-13"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></svg>',
+  plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 2v5m6-5v5M7 7h10v4a5 5 0 01-10 0zM12 16v6"/></svg>',
+};
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    n.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return n;
+}
+const $ = (id) => document.getElementById(id);
+
+function human(n) {
+  if (n == null) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return i === 0 ? `${n} B` : `${n.toFixed(n < 10 ? 2 : 1)} ${u[i]}`;
+}
+function fmtDate(t) {
+  if (!t) return "";
+  const d = new Date(t * 1000), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fmtEta(s) {
+  if (s == null || !isFinite(s)) return "—";
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = s % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { "X-Hub-Token": TOKEN } };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+const qs = (o) => "?" + new URLSearchParams(o).toString();
+
+function toast(msg, kind = "") {
+  const t = el("div", { class: `toast ${kind}` }, msg);
+  $("toasts").append(t);
+  setTimeout(() => t.remove(), kind === "err" ? 7000 : 3500);
+}
+
+function modal({ title, text, input, okText = "OK", danger = false, extra }) {
+  return new Promise((resolve) => {
+    const field = input !== undefined ? el("input", { type: "text", value: input, spellcheck: "false" }) : null;
+    const close = (v) => { bg.remove(); resolve(v); };
+    const ok = el("button", { class: danger ? "primary danger" : "primary",
+      onclick: () => close(field ? field.value : true) }, okText);
+    const bg = el("div", { class: "modal-bg", onclick: (e) => { if (e.target === bg) close(null); } },
+      el("div", { class: "modal" },
+        el("h3", {}, title), text ? el("p", {}, text) : null, extra || null, field,
+        el("div", { class: "row" }, el("button", { onclick: () => close(null) }, "Cancel"), ok)));
+    document.body.append(bg);
+    if (field) {
+      field.addEventListener("keydown", (e) => { if (e.key === "Enter") ok.click(); if (e.key === "Escape") close(null); });
+      field.focus(); field.select();
+    } else ok.focus();
+  });
+}
+
+// ---------------------------------------------------------------- state
+
+const app = { connected: false, status: null, settings: null, showHidden: false, jobs: [], seenDone: new Set() };
+
+class Pane {
+  constructor(side) {
+    this.side = side;               // "local" | "remote"
+    this.root = $(`pane-${side}`);
+    this.path = null; this.parent = null; this.sep = "/";
+    this.entries = []; this.sel = new Set(); this.anchor = null;
+    this.sort = { key: "name", dir: 1 }; this.filter = ""; this.places = [];
+    this.loading = false; this.error = null; this.editing = false;
+    this.build();
+  }
+  get isLocal() { return this.side === "local"; }
+  join(name) {
+    if (!this.path) return name;
+    return this.path.endsWith(this.sep) ? this.path + name : this.path + this.sep + name;
+  }
+  build() {
+    const r = this.root;
+    r.innerHTML = "";
+    this.freeEl = el("span", { class: "free" });
+    r.append(el("div", { class: "pane-head" },
+      el("h2", { html: (this.isLocal ? ICONS.pc : ICONS.ps5) + (this.isLocal ? "This PC" : "PlayStation 5") }),
+      this.freeEl));
+    this.placesEl = el("div", { class: "places" });
+    r.append(this.placesEl);
+    this.crumbsEl = el("div", { class: "crumbs", ondblclick: () => this.editPath() });
+    this.filterEl = el("input", { type: "search", class: "filter", placeholder: "Filter",
+      oninput: (e) => { this.filter = e.target.value.toLowerCase(); this.renderList(); } });
+    const tb = el("div", { class: "toolbar" },
+      el("button", { class: "icon", title: "Up one level", html: ICONS.up, onclick: () => this.parent && this.load(this.parent) }),
+      this.crumbsEl, this.filterEl,
+      el("button", { class: "icon", title: "Refresh", html: ICONS.refresh, onclick: () => this.load(this.path) }));
+    r.append(tb);
+    this.listEl = el("div", { class: "list" });
+    r.append(this.listEl);
+    this.sumEl = el("span", { class: "grow" });
+    this.actions = el("div", { style: "display:flex; gap:6px" });
+    r.append(el("div", { class: "pane-foot" }, this.sumEl, this.actions));
+
+    // drag & drop between panes
+    r.addEventListener("dragover", (e) => {
+      if (dragSide && dragSide !== this.side) { e.preventDefault(); r.classList.add("drop"); }
+    });
+    r.addEventListener("dragleave", (e) => { if (!r.contains(e.relatedTarget)) r.classList.remove("drop"); });
+    r.addEventListener("drop", (e) => {
+      r.classList.remove("drop");
+      if (dragSide && dragSide !== this.side) {
+        e.preventDefault();
+        const from = dragSide;
+        dragSide = null;
+        startTransfer(from === "local" ? "upload" : "download");
+      }
+    });
+    this.renderActions();
+  }
+  renderActions() {
+    this.actions.innerHTML = "";
+    const n = this.sel.size;
+    if (this.isLocal) {
+      this.actions.append(
+        el("button", { class: "ghost", title: "New folder", html: ICONS.newdir + "New folder", onclick: () => this.newFolder() }),
+        el("button", { class: "ghost", title: "Open in Explorer/Finder", html: ICONS.open, onclick: () => this.path && api("POST", "/api/local/open", { path: this.path }).catch((e) => toast(e.message, "err")) }));
+    } else {
+      const off = !app.connected;
+      this.actions.append(
+        el("button", { class: "ghost", html: ICONS.newdir + "New folder", disabled: off, onclick: () => this.newFolder() }),
+        el("button", { class: "ghost", html: ICONS.rename + "Rename", disabled: off || n !== 1, onclick: () => this.rename() }),
+        el("button", { class: "ghost danger", html: ICONS.trash + "Delete", disabled: off || n === 0, onclick: () => this.remove() }));
+    }
+  }
+  renderPlaces() {
+    this.placesEl.innerHTML = "";
+    for (const p of this.places) {
+      this.placesEl.append(el("button", { class: "chip" + (p.path === this.path ? " active" : ""),
+        title: p.path, onclick: () => this.load(p.path) }, p.name));
+    }
+  }
+  renderCrumbs() {
+    const c = this.crumbsEl;
+    c.innerHTML = "";
+    if (this.editing) {
+      const inp = el("input", { type: "text", value: this.path || "", spellcheck: "false" });
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { this.editing = false; this.load(inp.value.trim()); }
+        if (e.key === "Escape") { this.editing = false; this.renderCrumbs(); }
+      });
+      inp.addEventListener("blur", () => { this.editing = false; this.renderCrumbs(); });
+      c.append(inp); inp.focus(); inp.select();
+      return;
+    }
+    if (!this.path) { c.append(el("span", { class: "sep" }, "—")); return; }
+    const sep = this.sep;
+    let parts, acc;
+    if (sep === "\\") {
+      parts = this.path.split("\\").filter(Boolean);
+      acc = "";
+      parts.forEach((p, i) => {
+        acc = i === 0 ? p + "\\" : (acc.endsWith("\\") ? acc : acc + "\\") + p;
+        const target = acc;
+        if (i) c.append(el("span", { class: "sep" }, "›"));
+        c.append(el("button", { onclick: () => this.load(target) }, p));
+      });
+    } else {
+      parts = this.path.split("/").filter(Boolean);
+      c.append(el("button", { onclick: () => this.load("/") }, "/"));
+      acc = "";
+      parts.forEach((p) => {
+        acc += "/" + p;
+        const target = acc;
+        c.append(el("span", { class: "sep" }, "›"), el("button", { onclick: () => this.load(target) }, p));
+      });
+    }
+    c.title = "Double-click to type a path";
+  }
+  editPath() { this.editing = true; this.renderCrumbs(); }
+
+  visible() {
+    const f = this.filter;
+    let list = this.entries.filter((e) => (app.showHidden || !e.hidden) && (!f || e.name.toLowerCase().includes(f)));
+    const { key, dir } = this.sort;
+    list.sort((a, b) => {
+      if (a.dir !== b.dir) return a.dir ? -1 : 1;
+      let r = key === "name" ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+        : key === "size" ? a.size - b.size : a.mtime - b.mtime;
+      return r * dir;
+    });
+    return list;
+  }
+
+  renderList() {
+    const L = this.listEl;
+    L.innerHTML = "";
+    if (!this.isLocal && !app.connected) { L.append(disconnectedCard()); this.renderSummary(); return; }
+    if (this.error) {
+      L.append(el("div", { class: "empty" }, el("div", { class: "card" }, el("h3", {}, "Can't open this folder"), el("div", {}, this.error),
+        el("button", { onclick: () => this.load(this.path) }, "Retry"))));
+      this.renderSummary(); return;
+    }
+    const rows = this.visible();
+    this.rows = rows;
+    const allSel = rows.length > 0 && rows.every((e) => this.sel.has(e.name));
+    const th = (key, label, cls) => el("th", { class: cls + (this.sort.key === key ? " sorted" : ""),
+      onclick: () => { this.sort = { key, dir: this.sort.key === key ? -this.sort.dir : 1 }; this.renderList(); } },
+      label + (this.sort.key === key ? (this.sort.dir > 0 ? " ↑" : " ↓") : ""));
+    const head = el("thead", {}, el("tr", {},
+      el("th", { class: "cb" }, el("input", { type: "checkbox", title: "Select all", checked: allSel,
+        onchange: (e) => { rows.forEach((r) => e.target.checked ? this.sel.add(r.name) : this.sel.delete(r.name)); this.renderList(); } })),
+      th("name", "Name", "name"), th("size", "Size", "size"), th("mtime", "Modified", "date")));
+    const body = el("tbody");
+    rows.forEach((e, idx) => {
+      const tr = el("tr", { class: (e.dir ? "dir " : "") + (this.sel.has(e.name) ? "sel " : "") + (e.hidden ? "hidden-file" : ""),
+        draggable: "true", "data-idx": idx },
+        el("td", { class: "cb" }, el("input", { type: "checkbox", checked: this.sel.has(e.name),
+          onclick: (ev) => { ev.stopPropagation(); this.toggle(e.name, idx, ev, true); } })),
+        el("td", { class: "name", title: e.name, html: e.dir ? ICONS.folder : ICONS.file }),
+        el("td", { class: "size" }, e.dir ? "" : human(e.size)),
+        el("td", { class: "date" }, fmtDate(e.mtime)));
+      tr.children[1].append(el("span", {}, e.name));
+      tr.addEventListener("click", (ev) => this.toggle(e.name, idx, ev, false));
+      tr.addEventListener("dblclick", () => { if (e.dir) this.load(this.join(e.name)); });
+      tr.addEventListener("dragstart", (ev) => {
+        // Re-rendering here would detach the dragged row and Chrome would
+        // cancel the drag, so update the selection styling in place.
+        if (!this.sel.has(e.name)) {
+          this.sel.clear(); this.sel.add(e.name); this.anchor = idx;
+          for (const row of body.children) {
+            const on = row === tr;
+            row.classList.toggle("sel", on);
+            row.querySelector("input").checked = on;
+          }
+          this.renderSummary();
+        }
+        dragSide = this.side; ev.dataTransfer.effectAllowed = "copy"; ev.dataTransfer.setData("text/plain", "ps5cable");
+      });
+      tr.addEventListener("dragend", () => { dragSide = null; local.root.classList.remove("drop"); remote.root.classList.remove("drop"); });
+      body.append(tr);
+    });
+    L.append(el("table", {}, head, body));
+    if (!rows.length) L.append(el("div", { class: "empty" }, el("div", {}, this.filter ? "No matches" : "This folder is empty")));
+    if (this.loading) L.append(el("div", { class: "loading" }, el("div", { class: "spin" })));
+    this.renderSummary();
+  }
+
+  toggle(name, idx, ev, fromCheckbox) {
+    if (ev.shiftKey && this.anchor != null && this.rows) {
+      const [a, b] = [Math.min(this.anchor, idx), Math.max(this.anchor, idx)];
+      for (let i = a; i <= b; i++) this.sel.add(this.rows[i].name);
+    } else if (fromCheckbox || ev.ctrlKey || ev.metaKey) {
+      this.sel.has(name) ? this.sel.delete(name) : this.sel.add(name);
+      this.anchor = idx;
+    } else {
+      const only = this.sel.size === 1 && this.sel.has(name);
+      this.sel.clear();
+      if (!only) this.sel.add(name);
+      this.anchor = idx;
+    }
+    this.renderList();
+  }
+
+  renderSummary() {
+    const picked = this.entries.filter((e) => this.sel.has(e.name));
+    const files = picked.filter((e) => !e.dir), dirs = picked.length - files.length;
+    const bytes = files.reduce((s, e) => s + e.size, 0);
+    const parts = [];
+    if (files.length) parts.push(`${files.length} file${files.length > 1 ? "s" : ""} · ${human(bytes)}`);
+    if (dirs) parts.push(`${dirs} folder${dirs > 1 ? "s" : ""}`);
+    this.sumEl.textContent = parts.length ? parts.join(" + ") + " selected" : `${this.entries.length} items`;
+    this.summaryText = parts.join(" + ");
+    this.renderActions();
+    updateRail();
+  }
+
+  async load(path) {
+    if (!this.isLocal && !app.connected) { this.renderList(); return; }
+    this.loading = true; this.renderList();
+    try {
+      const d = await api("GET", `/api/${this.side}/list` + qs(path ? { path } : {}));
+      const changed = d.path !== this.path;
+      this.path = d.path; this.parent = d.parent; this.sep = d.sep; this.entries = d.entries; this.error = null;
+      if (changed) { this.sel.clear(); this.anchor = null; this.filter = ""; this.filterEl.value = ""; }
+      else { const names = new Set(d.entries.map((e) => e.name)); for (const n of [...this.sel]) if (!names.has(n)) this.sel.delete(n); }
+      if (this.isLocal && d.total) this.freeEl.textContent = `${human(d.free)} free of ${human(d.total)}`;
+    } catch (e) {
+      this.error = e.message;
+      if (path !== this.path) toast(e.message, "err");
+    } finally {
+      this.loading = false;
+      this.renderPlaces(); this.renderCrumbs(); this.renderList();
+    }
+  }
+
+  selectedPaths() { return [...this.sel].map((n) => this.join(n)); }
+
+  async newFolder() {
+    const name = await modal({ title: "New folder", text: `In ${this.path}`, input: "New folder", okText: "Create" });
+    if (!name) return;
+    try { await api("POST", `/api/${this.side}/mkdir`, { path: this.join(name) }); await this.load(this.path); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async rename() {
+    const [old] = [...this.sel];
+    const name = await modal({ title: "Rename", input: old, okText: "Rename" });
+    if (!name || name === old) return;
+    try { await api("POST", "/api/remote/rename", { src: this.join(old), dst: this.join(name) }); this.sel.clear(); this.sel.add(name); await this.load(this.path); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async remove() {
+    const paths = this.selectedPaths();
+    const ok = await modal({ title: `Delete ${paths.length} item${paths.length > 1 ? "s" : ""} from the PS5?`,
+      text: paths.slice(0, 6).join("\n") + (paths.length > 6 ? `\n…and ${paths.length - 6} more` : "") + "\n\nFolders are deleted with everything inside. This cannot be undone.",
+      okText: "Delete", danger: true });
+    if (!ok) return;
+    try { await api("POST", "/api/remote/delete", { paths }); this.sel.clear(); toast("Deleted", "ok"); await this.load(this.path); }
+    catch (e) { toast(e.message, "err"); await this.load(this.path); }
+  }
+}
+
+let dragSide = null;
+
+function disconnectedCard() {
+  const err = app.status && app.status.error;
+  return el("div", { class: "empty" }, el("div", { class: "card" },
+    el("div", { html: ICONS.plug.replace("<svg", '<svg class="big"') }),
+    el("h3", {}, "PS5 not connected"),
+    el("ol", {},
+      el("li", {}, "Cable plugged in, PS5 on LAN with IP ", el("code", {}, app.settings ? app.settings.host : "192.168.88.2")),
+      el("li", {}, "Run your jailbreak (ELF loader on port 9021)"),
+      el("li", {}, "Click ", el("b", {}, "Send payload"), ", then ", el("b", {}, "Connect"))),
+    el("div", { style: "display:flex; gap:8px" },
+      el("button", { class: "primary", onclick: sendPayload }, "Send payload"),
+      el("button", { onclick: () => connect() }, "Retry")),
+    err ? el("small", { style: "color:#6b7689" }, err) : null));
+}
+
+const local = new Pane("local");
+const remote = new Pane("remote");
+
+function updateRail() {
+  const up = $("btn-upload"), down = $("btn-download");
+  up.disabled = !app.connected || local.sel.size === 0 || !remote.path;
+  down.disabled = !app.connected || remote.sel.size === 0 || !local.path;
+  $("up-sum").textContent = local.sel.size ? local.summaryText : "select files on the PC";
+  $("down-sum").textContent = remote.sel.size ? remote.summaryText : "select files on the PS5";
+}
+
+// ---------------------------------------------------------------- connection
+
+function applyStatus(st) {
+  const was = app.connected;
+  app.status = st;
+  app.connected = !!st.connected;
+  $("dot").classList.toggle("on", app.connected);
+  $("btn-connect").textContent = app.connected ? "Connected" : "Connect";
+  $("btn-connect").classList.toggle("primary", !app.connected);
+  const m = $("ps5-meter");
+  m.hidden = !app.connected;
+  if (app.connected) {
+    $("ps5-banner").textContent = st.banner;
+    if (st.total) {
+      $("ps5-used").style.width = `${(100 * (st.total - st.free) / st.total).toFixed(1)}%`;
+      $("ps5-free").textContent = `${human(st.free)} free of ${human(st.total)} on /data`;
+      remote.freeEl.textContent = `${human(st.free)} free`;
+    }
+  } else remote.freeEl.textContent = "";
+  if (app.connected && !was) remote.load(remote.path || app.settings.remote_dir);
+  if (!app.connected && was) { remote.renderList(); toast("Lost connection to the PS5", "err"); }
+  if (!app.connected && !was) remote.renderList();
+  remote.renderActions(); updateRail();
+}
+
+async function connect(host) {
+  const btn = $("btn-connect");
+  btn.disabled = true;
+  try {
+    const st = await api("POST", "/api/connect", host ? { host } : {});
+    if (host || !app.settings) app.settings = (await api("GET", "/api/state")).settings;
+    applyStatus(st);
+    if (!st.connected && host) toast(`No answer from ${st.host}:${st.port}. Is the payload running?`, "err");
+  } catch (e) { toast(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
+
+async function sendPayload() {
+  toast("Sending payload to the PS5 ELF loader…");
+  try {
+    applyStatus(await api("POST", "/api/send-payload", {}));
+    toast("Payload running", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function findPs5() {
+  toast("Searching the cable for a PS5…");
+  try {
+    const { found } = await api("POST", "/api/discover", {});
+    if (!found.length) { toast("No PS5 answered. Send the payload first, or type the IP.", "err"); return; }
+    if (found.length === 1) { $("host").value = found[0].host; connect(found[0].host); return; }
+    let pick = null;
+    const list = el("div", { class: "found" }, found.map((f) => el("button", { onclick: () => { pick = f.host; document.querySelector(".modal .primary").click(); } },
+      el("code", {}, f.host), el("small", {}, f.banner))));
+    await modal({ title: "Several consoles found", extra: list, okText: "Close" });
+    if (pick) { $("host").value = pick; connect(pick); }
+  } catch (e) { toast(e.message, "err"); }
+}
+
+// ---------------------------------------------------------------- transfers
+
+async function startTransfer(direction) {
+  const src = direction === "upload" ? local : remote, dst = direction === "upload" ? remote : local;
+  if (!src.sel.size || !dst.path) return;
+  try {
+    await api("POST", "/api/transfer", {
+      direction, sources: src.selectedPaths(), dest: dst.path,
+      resume: $("opt-resume").checked, jobs: Number($("opt-jobs").value) || 4,
+    });
+    src.sel.clear(); src.renderList();
+    $("transfers").classList.remove("collapsed");
+    pollJobs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function jobCard(j) {
+  const pct = j.total ? (100 * j.done / j.total) : (j.state === "done" ? 100 : 0);
+  const names = j.sources.map((s) => s.split(/[\\/]/).filter(Boolean).pop() || s);
+  const title = names.length > 1 ? `${names[0]} + ${names.length - 1} more` : names[0];
+  const up = j.direction === "upload";
+  const stateText = { planning: "Scanning…", running: `${pct.toFixed(1)}%`, done: "Done", failed: "Finished with errors", cancelled: "Cancelled" }[j.state];
+  const meta = el("div", { class: "meta" },
+    el("span", { class: `state-${j.state}` }, stateText),
+    el("span", {}, `${human(j.done)} / ${human(j.total)}`),
+    el("span", {}, `${j.files_done} / ${j.files_total} files`),
+    j.state === "running" ? el("span", {}, `${human(j.rate)}/s`) : null,
+    j.state === "running" ? el("span", {}, `ETA ${fmtEta(j.eta)}`) : null,
+    j.state !== "running" && j.finished ? el("span", {}, `took ${fmtEta(j.finished - j.started)}`) : null,
+    j.skipped ? el("span", {}, `${j.skipped} already there, skipped`) : null,
+    el("span", { style: "margin-left:auto; overflow:hidden; text-overflow:ellipsis" }, `→ ${j.dest}`));
+  const card = el("div", { class: `job ${j.state}` },
+    el("div", { class: "job-top" },
+      el("span", { class: "dir" + (up ? "" : " down") }, up ? "PC → PS5" : "PS5 → PC"),
+      el("span", { class: "title", title: j.sources.join("\n") }, title),
+      (j.state === "running" || j.state === "planning")
+        ? el("button", { class: "ghost danger", onclick: () => api("POST", "/api/jobs/cancel", { id: j.id }).catch((e) => toast(e.message, "err")) }, "Cancel")
+        : null),
+    el("div", { class: "bar" }, el("i", { style: `width:${pct}%` })),
+    meta);
+  if (j.error_count) {
+    card.append(el("details", {}, el("summary", {}, `${j.error_count} error${j.error_count > 1 ? "s" : ""}`),
+      el("pre", {}, j.errors.map((e) => (e.file ? e.file + ": " : "") + e.error).join("\n"))));
+  }
+  return card;
+}
+
+function renderJobs() {
+  const box = $("jobs");
+  box.innerHTML = "";
+  if (!app.jobs.length) box.append(el("div", { class: "no-jobs" }, "Nothing yet. Select files on one side and send them to the other — or drag them across."));
+  for (const j of app.jobs) box.append(jobCard(j));
+  const active = app.jobs.filter((j) => j.state === "running" || j.state === "planning").length;
+  $("tx-badge").hidden = !active;
+  $("tx-badge").textContent = active;
+}
+
+let pollTimer = null;
+async function pollJobs() {
+  clearTimeout(pollTimer);
+  try {
+    const { jobs } = await api("GET", "/api/jobs");
+    app.jobs = jobs;
+    for (const j of jobs) {
+      if (["done", "failed", "cancelled"].includes(j.state) && !app.seenDone.has(j.id)) {
+        app.seenDone.add(j.id);
+        if (j.state === "done") toast(`${j.direction === "upload" ? "Sent" : "Copied"} ${j.files_total} file${j.files_total === 1 ? "" : "s"} (${human(j.total)})`, "ok");
+        else if (j.state === "failed") toast(`Transfer finished with ${j.error_count} error(s)`, "err");
+        (j.direction === "upload" ? remote : local).load((j.direction === "upload" ? remote : local).path);
+      }
+    }
+    renderJobs();
+  } catch (e) { /* hub briefly unreachable */ }
+  const active = app.jobs.some((j) => j.state === "running" || j.state === "planning");
+  pollTimer = setTimeout(pollJobs, active ? 500 : 3000);
+}
+
+// ---------------------------------------------------------------- boot
+
+async function boot() {
+  const st = await api("GET", "/api/state");
+  app.settings = st.settings;
+  $("host").value = st.settings.host;
+  $("opt-resume").checked = !!st.settings.resume;
+  $("opt-jobs").value = st.settings.jobs;
+  local.places = st.local_places; remote.places = st.remote_places;
+  if (!st.payload) $("btn-payload").title = "ps5cable.elf not found next to the app";
+  local.load(st.settings.local_dir);
+  remote.renderPlaces();
+  applyStatus(st.status);
+  pollJobs();
+  setInterval(async () => {
+    try { applyStatus((await api("GET", "/api/state")).status); } catch (e) { /* ignore */ }
+  }, 5000);
+}
+
+$("btn-connect").addEventListener("click", () => connect($("host").value.trim()));
+$("host").addEventListener("keydown", (e) => { if (e.key === "Enter") connect($("host").value.trim()); });
+$("btn-find").addEventListener("click", findPs5);
+$("btn-payload").addEventListener("click", sendPayload);
+$("btn-upload").addEventListener("click", () => startTransfer("upload"));
+$("btn-download").addEventListener("click", () => startTransfer("download"));
+$("btn-clear").addEventListener("click", async () => { app.jobs = (await api("POST", "/api/jobs/clear", {})).jobs; renderJobs(); });
+$("btn-collapse").addEventListener("click", () => $("transfers").classList.toggle("collapsed"));
+$("btn-quit").addEventListener("click", async () => {
+  if (app.jobs.some((j) => j.state === "running") && !(await modal({ title: "Quit while transfers are running?", okText: "Quit", danger: true }))) return;
+  await api("POST", "/api/quit", {}).catch(() => {});
+  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b95a7">ps5cable Hub closed. You can close this window.</div>';
+});
+$("opt-resume").addEventListener("change", (e) => api("POST", "/api/settings", { resume: e.target.checked }));
+$("opt-jobs").addEventListener("change", (e) => api("POST", "/api/settings", { jobs: Number(e.target.value) || 4 }));
+$("opt-hidden").addEventListener("change", (e) => { app.showHidden = e.target.checked; local.renderList(); remote.renderList(); });
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "Delete" && remote.sel.size && app.connected) remote.remove();
+});
+
+boot().catch((e) => toast(e.message, "err"));
+</script>
+</body>
+</html>
