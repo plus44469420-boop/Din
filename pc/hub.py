@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import convert  # noqa: E402
 import linkinfo  # noqa: E402
 import ps5cable  # noqa: E402
 
@@ -60,7 +61,8 @@ class Settings:
     DEFAULTS = {"host": ps5cable.DEFAULT_HOST, "port": ps5cable.DEFAULT_PORT,
                 "local_dir": str(Path.home()), "remote_dir": "/data",
                 "resume": True, "jobs": 4, "auto_payload": True,
-                "loader_port": ps5cable.ELFLDR_PORT}
+                "loader_port": ps5cable.ELFLDR_PORT,
+                "convert_output": str(convert.DEFAULT_OUTPUT), "convert_prefs": {}}
 
     def __init__(self, path=SETTINGS_PATH):
         self.path = path
@@ -160,6 +162,7 @@ class Hub:
         self.link_lock = threading.Lock()
         self.speedtest_lock = threading.Lock()
         self.last_speedtest = None
+        self.converter = convert.Converter()
 
     # --- PS5 helpers --------------------------------------------------------
 
@@ -289,7 +292,9 @@ class Hub:
 
     def busy(self):
         with self.jobs_lock:
-            return any(j.state in ("planning", "running") for j in self.jobs.values())
+            if any(j.state in ("planning", "running") for j in self.jobs.values()):
+                return True
+        return self.converter.busy()
 
     def jobs_list(self):
         with self.jobs_lock:
@@ -593,6 +598,77 @@ def api_speedtest(hub, args):
     return hub.speed_test(seconds)
 
 
+def _converting(fn):
+    def wrapped(hub, args):
+        try:
+            return fn(hub, args)
+        except convert.ConvertError as e:
+            raise ApiError(str(e))
+    return wrapped
+
+
+def _convert_output(hub, args):
+    out = (args.get("output_dir") or "").strip() or hub.settings.get("convert_output")
+    return str(Path(out).expanduser())
+
+
+@_converting
+def api_convert_inspect(hub, args):
+    _require(args, "source")
+    out = _convert_output(hub, args)
+    info = convert.inspect(str(Path(args["source"]).expanduser()), out)
+    info["converter"] = str(convert.find_converter() or "")
+    return info
+
+
+@_converting
+def api_convert_estimate(hub, args):
+    _require(args, "source")
+    return convert.estimate(str(Path(args["source"]).expanduser()), _convert_output(hub, args))
+
+
+@_converting
+def api_convert_start(hub, args):
+    _require(args, "make", "source")
+    args["source"] = str(Path(args["source"]).expanduser())
+    if args["make"] != "compress" or (args.get("output_dir") or "").strip():
+        args["output_dir"] = _convert_output(hub, args)
+    prefs = {k: v for k, v in args.items()
+             if k in ("make", "compression", "language", "format", "compress", "lz4",
+                      "lz4_install_runtime", "verify_chunk_kib", "full_verify")}
+    hub.settings.update(convert_output=args.get("output_dir") or hub.settings.get("convert_output"),
+                        convert_prefs={**hub.settings.get("convert_prefs"), **prefs})
+    return hub.converter.submit(args).to_dict()
+
+
+def api_convert_jobs(hub, args):
+    return {"jobs": hub.converter.list(), "converter": str(convert.find_converter() or "")}
+
+
+@_converting
+def api_convert_cancel(hub, args):
+    _require(args, "id")
+    hub.converter.cancel(args["id"])
+    return {"jobs": hub.converter.list()}
+
+
+def api_convert_clear(hub, args):
+    hub.converter.clear()
+    return {"jobs": hub.converter.list()}
+
+
+def api_convert_send(hub, args):
+    """Copies a finished conversion to the PS5, as a normal upload job."""
+    _require(args, "id", "dest")
+    job = hub.converter.get(args["id"])
+    if not job or job.state != "done":
+        raise ApiError("That conversion has not finished.")
+    if not hub.status().get("connected"):
+        raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
+    return hub.start_job(True, [job.result["path"]], args["dest"], True,
+                         int(hub.settings.get("jobs"))).to_dict()
+
+
 def api_discover(hub, args):
     found = ps5cable.discover(int(hub.settings.get("port")), timeout=1.5)
     return {"found": [{"host": ip, "banner": b} for ip, b in found]}
@@ -720,6 +796,13 @@ ROUTES = {
     ("POST", "/api/connect"): api_connect,
     ("GET", "/api/link"): api_link,
     ("POST", "/api/speedtest"): api_speedtest,
+    ("GET", "/api/convert/jobs"): api_convert_jobs,
+    ("POST", "/api/convert/inspect"): api_convert_inspect,
+    ("POST", "/api/convert/estimate"): api_convert_estimate,
+    ("POST", "/api/convert/start"): api_convert_start,
+    ("POST", "/api/convert/cancel"): api_convert_cancel,
+    ("POST", "/api/convert/clear"): api_convert_clear,
+    ("POST", "/api/convert/send"): api_convert_send,
     ("POST", "/api/discover"): api_discover,
     ("POST", "/api/send-payload"): api_send_payload,
     ("POST", "/api/local/mkdir"): api_local_mkdir,

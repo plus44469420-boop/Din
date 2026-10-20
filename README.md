@@ -108,6 +108,20 @@ These follow the conventions of [ps5upload](https://github.com/phantomptr/ps5upl
 
 Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. Moving files *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; copy instead.
 
+### Converting games (packages, game images, folders)
+
+**Convert** in the top bar, or **Convert…** in the PC pane with a game folder or image selected, opens the same converter ps5upload has under *Convert Games*, with the same options. It runs on the PC, so the PS5 only has to be connected to send the result.
+
+1. **Game**: a decrypted game folder (`sce_sys/param.json` + `eboot.bin`), a game image (`.exfat`, `.ffpkg`, `.ffpfs`, `.ffpfsc`) or a package made with the debug key. **Check** lists its title, content ID, size, the firmware it declares and runs on, and every readiness check.
+2. **What to make**:
+   - **A package (.pkg)**: compression **Fast**, **Balanced** (recommended), **Smallest** or **Stored** (no compression, for a console that won't start a compressed package), each with its estimated size and time; the **game language** PlayGo declares; and under *Package details* the content ID, file name, minimum firmware (filled in from the game's modules, so a backport declares what it really runs on) and passcode.
+   - **A game image** for ShadowMount+: **.ffpkg (UFS2)**, recommended; **.exfat**; or **.ffpfs (PFS)**, experimental. **Compress it into a .ffpfsc** makes it 40–60% smaller and read-only. For an `.exfat` of a game that reads through AMPR, **AMPR LZ4 asset packs**, optionally with ampr_emu 0.4.2.1 put into the image and a custom `.toml` profile. **Read-back check, per read** sets the verification read size.
+   - **A game folder**: an image or debug-key package unpacked back into a plain folder.
+   - **Full verification** (all three) re-reads every byte of the output instead of a sample.
+3. **Run**: conversions queue and run one at a time with progress per stage (plan, compress, write, verify) and can be cancelled. When one finishes, **Send to PS5** copies it over the cable: game images to `/data/homebrew` by default, packages to `/user/data/ps5upload/pkg_library`.
+
+On FW 13.60 a PS5 fake package installs but won't play, so for PS5 games make a **game image** (the app marks it as recommended). The converter is `ps5cable-convert` (in `converter/`), built on ps5upload's own writers: its `.exfat` writer and FPKG builder, and quer3q's PS5 Dump Forge `.ffpkg`/`.ffpfs`/`.ffpfsc` writers. Every output is written as `.partial`, read back and hash-checked, and only then renamed. Not ported: ps5upload's ZIP/7z/RAR sources and reading a game straight off the console; unpack archives or copy the game to the PC first.
+
 ## Using the command line
 
 1. Send the payload over the cable:
@@ -167,6 +181,14 @@ make -C payload                                       # -> payload/ps5cable.elf
 make -C payload deploy PS5_HOST=192.168.88.2          # build and send to the ELF loader
 ```
 
+The converter needs Rust (stable, 1.85 or newer):
+
+```sh
+cargo build --release --manifest-path converter/Cargo.toml   # -> converter/target/release/ps5cable-convert
+converter/target/release/ps5cable-convert image "D:\Games\PPSA01234" --format ffpkg --compress
+converter/target/release/ps5cable-convert help                # every command and option
+```
+
 `make -C payload host` builds the same server for your PC. The end-to-end tests and the Hub tests use that build:
 
 ```sh
@@ -177,7 +199,7 @@ To build the Windows executables (CI does the same on `windows-latest`), run thi
 
 ```sh
 pip install pyinstaller
-pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
 ```
 
