@@ -32,6 +32,17 @@ jobs:
       - name: Build payload
         run: make -C payload
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: converter
+
+      - name: Build and test the converter
+        run: |
+          cargo build --release --manifest-path converter/Cargo.toml
+          cargo test --release --manifest-path converter/Cargo.toml
+
       - name: Tests
         run: python3 -m unittest discover -s tests -v
 
@@ -55,12 +66,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: converter
+
+      - name: Build ps5cable-convert.exe
+        run: cargo build --release --manifest-path converter/Cargo.toml
+
       - name: Build ps5cable-hub.exe and ps5cable.exe
         shell: bash
         run: |
           pip install pyinstaller
           pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
-            --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+            --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." \
+            --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
           pyinstaller --onefile --console --name ps5cable --paths pc pc/ps5cable.py
 
       - name: Smoke test the hub executable
@@ -71,6 +92,7 @@ jobs:
           url=$(grep -o 'http[^ ]*' hub.log)
           curl -sf "$url" | grep -q "ps5cable Hub"
           curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state | grep -q ps5cable.elf
+          curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/convert/jobs | grep -q ps5cable-convert.exe
           taskkill //F //IM ps5cable-hub.exe || true
 
       - name: Package
@@ -78,7 +100,8 @@ jobs:
         run: |
           mkdir -p out/ps5cable
           cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
-             pc/ps5cable.py pc/linkinfo.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
+             converter/target/release/ps5cable-convert.exe \
+             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
              pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
              README.md LICENSE out/ps5cable/
           (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)
