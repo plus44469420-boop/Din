@@ -105,13 +105,13 @@
   .cable.ok { border-color: #1f6b3a; } .cable.ok svg { color: var(--ok); }
   .cable.warn { border-color: #6b4a12; } .cable.warn svg { color: var(--warn); } .cable.warn .txt small { color: #fcd34d; }
   .cable.bad { border-color: #7f1d1d; } .cable.bad svg { color: var(--bad); } .cable.bad .txt small { color: #fca5a5; }
-  .modal.wide { width: 560px; }
+  .modal.wide { width: 640px; }
   .facts { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; margin: 0; }
   .facts dt { color: var(--muted); }
   .facts dd { margin: 0; overflow-wrap: anywhere; }
   .facts dd.hl { font-weight: 700; }
   .bars { display: grid; gap: 8px; }
-  .bars .b { display: grid; grid-template-columns: 170px 1fr 82px; align-items: center; gap: 10px; font-size: 12.5px; }
+  .bars .b { display: grid; grid-template-columns: 250px 1fr 82px; align-items: center; gap: 10px; font-size: 12.5px; }
   .bars .track { height: 8px; border-radius: 99px; background: #0c111a; overflow: hidden; }
   .bars .track i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
   .bars .b.limit .track i { background: var(--warn); }
@@ -841,7 +841,7 @@ function openCablePanel() {
       ["PS5 port", "1 Gbps Ethernet (built in)"],
       ["Best case", `${fmtRate(link.expected_mbs)}  ·  ~${((link.expected_mbs || 0) * 60 / 1024).toFixed(1)} GB per minute`],
     ].filter(([, v]) => v);
-    const dl = el("dl", { class: "facts" }, facts.map(([k, v]) =>
+    const dl = el("dl", { class: "facts" }, facts.flatMap(([k, v]) =>
       [el("dt", {}, k), el("dd", { class: k === "Best case" ? "hl" : null }, v)]));
 
     const rows = (link.limits || []).map((l) => ({ name: l.name, mbs: l.mbs, limit: l.name === link.bottleneck }));
