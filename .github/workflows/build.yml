@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  PS5_SDK_VERSION: v0.44
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 llvm-18
+
+      - name: Install ps5-payload-sdk
+        run: |
+          wget -q https://github.com/ps5-payload-dev/sdk/releases/download/${PS5_SDK_VERSION}/ps5-payload-sdk.zip
+          sudo unzip -q -d /opt ps5-payload-sdk.zip
+          echo "PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk" >> "$GITHUB_ENV"
+
+      - name: Build payload
+        run: make -C payload
+
+      - name: End-to-end tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Package
+        run: |
+          mkdir -p dist/ps5cable
+          cp payload/ps5cable.elf pc/ps5cable.py pc/setup-direct-link-windows.ps1 \
+             pc/setup-direct-link-unix.sh README.md LICENSE dist/ps5cable/
+          (cd dist && zip -qr ps5cable.zip ps5cable)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5cable
+          path: dist/ps5cable
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/ps5cable.zip --generate-notes
