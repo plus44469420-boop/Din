@@ -199,7 +199,7 @@ To build the Windows executables (CI does the same on `windows-latest`), run thi
 
 ```sh
 pip install pyinstaller
-pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
 ```
 
