@@ -22,6 +22,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import linkinfo  # noqa: E402
+
 DEFAULT_PORT = 9113
 ELFLDR_PORT = 9021
 DEFAULT_HOST = "192.168.88.2"
@@ -30,6 +33,7 @@ PROTO_VER = 1
 
 CMD_PING, CMD_LIST, CMD_STAT, CMD_MKDIR, CMD_DELETE = 1, 2, 3, 4, 5
 CMD_RENAME, CMD_PUT, CMD_GET, CMD_DF, CMD_SHUTDOWN = 6, 7, 8, 9, 10
+CMD_SINK, CMD_SOURCE = 11, 12
 
 F_RECURSIVE = 1 << 0
 F_MKDIRS = 1 << 1
@@ -158,6 +162,53 @@ class Connection:
                     progress(len(chunk))
         self._response()
 
+    def speed_upload(self, nbytes):
+        """Sends nbytes that the PS5 discards; returns MB/s as timed by the PS5."""
+        self._request(CMD_SINK, "", 0, nbytes)
+        self._response()
+        chunk = memoryview(bytes(min(CHUNK, nbytes)))
+        remaining = nbytes
+        while remaining:
+            n = min(len(chunk), remaining)
+            self.sock.sendall(chunk[:n])
+            remaining -= n
+        _, _, _, elapsed_us = self._response()
+        return nbytes / 1e6 / max(elapsed_us / 1e6, 1e-6)
+
+    def speed_download(self, nbytes):
+        """Receives nbytes of zeros from the PS5; returns MB/s."""
+        self._request(CMD_SOURCE, "", 0, nbytes)
+        _, _, remaining, _ = self._response()
+        buf = memoryview(bytearray(CHUNK))
+        start = time.perf_counter()
+        while remaining:
+            k = self.sock.recv_into(buf, min(CHUNK, remaining))
+            if not k:
+                raise ConnectionError("speed test cut short")
+            remaining -= k
+        return nbytes / 1e6 / max(time.perf_counter() - start, 1e-6)
+
+    def speed_test(self, seconds=3.0):
+        """Measures the raw cable link both ways without touching storage.
+        A short probe sizes the real run to take about `seconds` each way."""
+        out = {}
+        for name, fn in (("up_mbs", self.speed_upload), ("down_mbs", self.speed_download)):
+            rate = fn(8 * 1024 * 1024)
+            size = int(min(max(rate * 1e6 * seconds, 16e6), 2e9))
+            out[name] = round(fn(size), 1)
+        return out
+
+    def read_small(self, remote, limit=1024 * 1024):
+        """Returns the contents of a small PS5 file (e.g. a config file)."""
+        st = self.stat(remote)
+        if st is None or st[0] != KIND_FILE:
+            raise RemoteError(f"{remote}: not a file")
+        if st[1] > limit:
+            raise ValueError(f"{remote} is larger than {limit} bytes")
+        self._request(CMD_GET, remote, 0, 0)
+        _, _, n, _ = self._response()
+        return self._recv_exact(n)
+
     def get_file(self, remote, local, offset=0, progress=None):
         self._request(CMD_GET, remote, 0, offset)
         _, _, remaining, _ = self._response()
@@ -275,6 +326,65 @@ def discover(port=DEFAULT_PORT, timeout=1.5, targets=None):
     return sorted(found.items())
 
 
+def local_ip_for(host):
+    """The PC address the OS would use to reach `host` (no packets sent)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((host, 9))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+def _tcp_state(host, port, timeout):
+    """'open', 'refused' (host is up, nothing listening) or 'silent'."""
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+        return "open"
+    except ConnectionRefusedError:
+        return "refused"
+    except OSError:
+        return "silent"
+
+
+def probe(host, port=DEFAULT_PORT, loader_port=ELFLDR_PORT, timeout=1.0):
+    """Works out how far along the cable link is.
+
+    state is one of:
+      connected  the ps5cable payload answered (banner/free/total filled in)
+      loader     the PS5 is on the cable with its ELF loader up; send the payload
+      reachable  something answers at `host`, but neither port is open
+      offline    nothing answers; `same_subnet` tells whether the PC even has
+                 an address on the cable's /24
+    """
+    out = {"host": host, "port": port, "state": "offline", "banner": None,
+           "free": None, "total": None, "local_ip": local_ip_for(host)}
+    out["same_subnet"] = bool(out["local_ip"]) and \
+        out["local_ip"].rsplit(".", 1)[0] == host.rsplit(".", 1)[0]
+    try:
+        with Connection(host, port, timeout=timeout) as c:
+            c.sock.settimeout(timeout * 3)
+            _, out["banner"] = c.ping()
+            try:
+                out["free"], out["total"] = c.df("/data")
+            except RemoteError:
+                pass
+        out["state"] = "connected"
+        return out
+    except ConnectionRefusedError:
+        out["state"] = "reachable"
+    except (OSError, ConnectionError):
+        pass
+    loader = _tcp_state(host, loader_port, timeout)
+    if loader == "open":
+        out["state"] = "loader"
+    elif loader == "refused":
+        out["state"] = "reachable"
+    return out
+
+
 def resolve_host(args):
     if args.host:
         return args.host
@@ -333,6 +443,63 @@ def cmd_send_payload(args):
     print("Payload sent, but it did not answer yet. Watch the PS5 screen for a "
           "notification.")
     return 1
+
+
+STATUS_TEXT = {
+    "connected": "PS5 CONNECTED",
+    "loader": "PS5 found on the cable, payload not running (run: send-payload)",
+    "reachable": "PS5 answers on the cable, but neither the payload nor an ELF loader "
+                 "is listening (run the jailbreak first)",
+    "offline": "No PS5 on the cable",
+}
+
+
+def cmd_status(args):
+    host = args.host or os.environ.get("PS5_HOST") or DEFAULT_HOST
+    st = probe(host, args.port)
+    print(STATUS_TEXT[st["state"]] + (f": {st['banner']}" if st["banner"] else ""))
+    print(f"  PS5 {host}, this PC {st['local_ip'] or 'no route'}")
+    if st["total"]:
+        print(f"  /data: {human(st['free'])} free of {human(st['total'])}")
+    if st["state"] == "offline" and not st["same_subnet"]:
+        print(f"  This PC has no address on {host.rsplit('.', 1)[0]}.x, so the cable "
+              "adapter is unplugged or not set up (run the setup-direct-link script).")
+    if st["local_ip"]:
+        print_adapter(linkinfo.detect(st["local_ip"]))
+    return 0 if st["state"] == "connected" else 1
+
+
+def print_adapter(info):
+    print(f"  Adapter: {info.get('summary') or 'unknown'}")
+    print(f"  Connection: {info['connection']}"
+          + (f", interface {info['interface']}" if info.get("interface") else ""))
+    if info.get("usb_label"):
+        print(f"  USB link: {info['usb_label']}")
+    if info.get("link_mbps"):
+        print(f"  Ethernet link: {info['link_mbps']} Mbps")
+    print(f"  Best case: about {linkinfo.human_rate(info['expected_mbs'])} "
+          f"(limited by {info['bottleneck']})")
+    for note in info["notes"]:
+        print(f"  - {note}")
+
+
+def cmd_speedtest(args):
+    host = resolve_host(args)
+    with connect(args) as c:
+        print(f"Measuring the cable link to {host} (about 8 seconds)...")
+        try:
+            res = c.speed_test()
+        except RemoteError as e:
+            sys.exit(f"The payload on the PS5 is too old for speed tests ({e}). "
+                     "Send the new ps5cable.elf.")
+    info = linkinfo.detect(local_ip_for(host))
+    verdict = linkinfo.interpret_speedtest(info, res["up_mbs"], res["down_mbs"])
+    print(f"  PC -> PS5: {linkinfo.human_rate(res['up_mbs'])}")
+    print(f"  PS5 -> PC: {linkinfo.human_rate(res['down_mbs'])}")
+    print_adapter(info)
+    for note in verdict["notes"]:
+        print(f"  * {note}")
+    return 0
 
 
 def cmd_ping(args):
@@ -585,6 +752,12 @@ def build_parser():
                                                   / "payload" / "ps5cable.elf"))
     s.add_argument("--loader-port", type=int, default=ELFLDR_PORT)
     s.set_defaults(func=cmd_send_payload)
+
+    s = sub.add_parser("status", help="show whether the PS5 is connected over the cable")
+    s.set_defaults(func=cmd_status)
+
+    s = sub.add_parser("speedtest", help="measure the cable link speed both ways")
+    s.set_defaults(func=cmd_speedtest)
 
     s = sub.add_parser("ping", help="check the payload is reachable")
     s.set_defaults(func=cmd_ping)
