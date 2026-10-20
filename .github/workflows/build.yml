@@ -32,23 +32,65 @@ jobs:
       - name: Build payload
         run: make -C payload
 
-      - name: End-to-end tests
+      - name: Tests
         run: python3 -m unittest discover -s tests -v
-
-      - name: Package
-        run: |
-          mkdir -p dist/ps5cable
-          cp payload/ps5cable.elf pc/ps5cable.py pc/setup-direct-link-windows.ps1 \
-             pc/setup-direct-link-unix.sh README.md LICENSE dist/ps5cable/
-          (cd dist && zip -qr ps5cable.zip ps5cable)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5cable
-          path: dist/ps5cable
+          name: payload
+          path: payload/ps5cable.elf
+
+  windows-app:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: payload
+          path: payload
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build ps5cable-hub.exe and ps5cable.exe
+        shell: bash
+        run: |
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
+            --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+          pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
+
+      - name: Smoke test the hub executable
+        shell: bash
+        run: |
+          ./dist/ps5cable-hub.exe --no-browser --stay --port 8799 --settings hub-test.json > hub.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "running at" hub.log && break; sleep 1; done
+          url=$(grep -o 'http[^ ]*' hub.log)
+          curl -sf "$url" | grep -q "ps5cable Hub"
+          curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state | grep -q ps5cable.elf
+          taskkill //F //IM ps5cable-hub.exe || true
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out/ps5cable
+          cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
+             pc/ps5cable.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
+             pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
+             README.md LICENSE out/ps5cable/
+          (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5cable-windows
+          path: out/ps5cable
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/ps5cable.zip --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" out/ps5cable-windows.zip --generate-notes
