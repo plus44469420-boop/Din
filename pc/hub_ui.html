@@ -23,6 +23,7 @@
     --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body {
     background: radial-gradient(1200px 600px at 80% -10%, #13284d 0%, transparent 60%), var(--bg);
@@ -59,7 +60,8 @@
     display: flex; align-items: center; gap: 14px; padding: 12px 18px;
     border-bottom: 1px solid var(--border); background: #0b1019cc; backdrop-filter: blur(8px);
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: .2px; white-space: nowrap; }
+  @media (max-width: 1400px) { .brand small { display: none; } }
   .brand .logo {
     width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
     background: linear-gradient(135deg, #2f7cf6, #7c3aed); box-shadow: 0 4px 18px #2f7cf655;
@@ -72,9 +74,70 @@
   }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px #ef444422; }
   .dot.on { background: var(--ok); box-shadow: 0 0 0 3px #22c55e22; }
+  .link {
+    display: flex; align-items: center; gap: 10px; padding: 6px 14px 6px 10px; border-radius: 12px;
+    border: 1px solid #5b1f24; background: linear-gradient(180deg, #2a1215, #1b0d10); min-width: 230px;
+    transition: background .25s, border-color .25s;
+  }
+  .link .lamp {
+    width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--bad);
+    box-shadow: 0 0 0 4px #ef444426, 0 0 12px #ef444480;
+  }
+  .link .txt { display: grid; line-height: 1.15; min-width: 0; }
+  .link .txt b { font-size: 14px; letter-spacing: .3px; color: #fecaca; }
+  .link .txt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  .link.ok { border-color: #1f6b3a; background: linear-gradient(180deg, #0f2b1a, #0b1d13); }
+  .link.ok .lamp { background: var(--ok); box-shadow: 0 0 0 4px #22c55e2e, 0 0 16px #22c55eaa; animation: glow 2.4s ease-in-out infinite; }
+  .link.ok .txt b { color: #86efac; }
+  .link.warn { border-color: #6b4a12; background: linear-gradient(180deg, #2b210c, #1c1609); }
+  .link.warn .lamp { background: var(--warn); box-shadow: 0 0 0 4px #f59e0b2e, 0 0 14px #f59e0b99; animation: blink 1s ease-in-out infinite; }
+  .link.warn .txt b { color: #fcd34d; }
+  @keyframes glow { 50% { box-shadow: 0 0 0 6px #22c55e1f, 0 0 22px #22c55ecc; } }
+  @keyframes blink { 50% { opacity: .45; } }
+  .cable {
+    display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 9px; border-radius: 12px; min-width: 0;
+    border: 1px solid var(--border); background: var(--panel); text-align: left;
+  }
+  .cable svg { width: 18px; height: 18px; color: var(--muted); }
+  .cable .txt { display: grid; line-height: 1.15; min-width: 0; }
+  .cable .txt b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  .cable .txt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .cable.ok { border-color: #1f6b3a; } .cable.ok svg { color: var(--ok); }
+  .cable.warn { border-color: #6b4a12; } .cable.warn svg { color: var(--warn); } .cable.warn .txt small { color: #fcd34d; }
+  .cable.bad { border-color: #7f1d1d; } .cable.bad svg { color: var(--bad); } .cable.bad .txt small { color: #fca5a5; }
+  .modal.wide { width: 560px; }
+  .facts { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; margin: 0; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .facts dd.hl { font-weight: 700; }
+  .bars { display: grid; gap: 8px; }
+  .bars .b { display: grid; grid-template-columns: 170px 1fr 82px; align-items: center; gap: 10px; font-size: 12.5px; }
+  .bars .track { height: 8px; border-radius: 99px; background: #0c111a; overflow: hidden; }
+  .bars .track i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+  .bars .b.limit .track i { background: var(--warn); }
+  .bars .b span:last-child { text-align: right; font-family: var(--mono); }
+  .notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: #cbd5e1; }
+  .notes.ok li::marker { color: var(--ok); } .notes.warn li::marker { color: var(--warn); } .notes.bad li::marker { color: var(--bad); }
+  .st-result { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #0c111a; }
+  .st-result .nums { display: flex; gap: 22px; font-size: 13px; }
+  .st-result .nums b { font-size: 18px; font-family: var(--mono); }
+  .pane-head .linkchip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: #3a1418; color: #fca5a5; }
+  .pane-head .linkchip.ok { background: #12351f; color: #86efac; }
+  .menu {
+    position: fixed; z-index: 30; background: #111827; border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 18px 50px #000b; width: 430px; max-height: 70vh; overflow: auto; padding: 6px;
+  }
+  .menu h4 { margin: 8px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .menu button { width: 100%; display: grid; grid-template-columns: 1fr auto; text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 8px; gap: 2px 10px; }
+  .menu button:hover { background: var(--row-hover); }
+  .menu code { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+  .menu small { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+  .menu .tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #1b2a44; color: #9cc2ff; align-self: center; }
+  .menu .tag.new { background: #2a2414; color: #fcd34d; }
+  .rail .tip { font-size: 11.5px; color: #fcd34d; background: #2a210c; border: 1px solid #6b4a12; border-radius: 10px; padding: 8px 10px; line-height: 1.35; }
   .conn input { width: 140px; border: none; background: transparent; padding: 4px 2px; font-family: var(--mono); }
   .conn input:focus { box-shadow: none; }
-  .conn .label { color: var(--muted); font-size: 12px; }
+  .conn .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .spacer { flex: 1; }
   .meter { display: flex; flex-direction: column; gap: 4px; min-width: 190px; font-size: 12px; color: var(--muted); }
   .bar { height: 6px; border-radius: 99px; background: #1b2332; overflow: hidden; }
@@ -143,6 +206,13 @@
   .empty .card { max-width: 380px; display: grid; gap: 12px; justify-items: center; }
   .empty h3 { margin: 0; color: var(--text); font-size: 16px; }
   .empty ol { text-align: left; margin: 0; padding-left: 20px; line-height: 1.8; }
+  .empty ol.steps { list-style: none; padding: 0; display: grid; gap: 8px; }
+  .steps li { display: flex; gap: 10px; align-items: center; color: var(--muted); }
+  .steps .tick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #334155; display: grid; place-items: center; font-size: 12px; flex: none; }
+  .steps li.done { color: var(--text); }
+  .steps li.done .tick { background: var(--ok); border-color: var(--ok); color: #052e14; font-weight: 800; }
+  .steps li.active { color: #fcd34d; }
+  .steps li.active .tick { border-color: var(--warn); animation: blink 1s ease-in-out infinite; }
   .empty .big { width: 46px; height: 46px; color: #3b475b; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; background: #10151f99; }
   .spin { width: 26px; height: 26px; border: 3px solid #2a3446; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -208,9 +278,16 @@
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0l-3-3m3 3l-3 3"/></svg></div>
     <div>ps5cable Hub <small>PC ⇄ PS5</small></div>
   </div>
+  <div class="link" id="link" title="Cable link to the PS5">
+    <span class="lamp"></span>
+    <span class="txt"><b id="link-title">PS5 not connected</b><small id="link-sub">Checking the cable…</small></span>
+  </div>
+  <button class="cable" id="cable" title="Cable / adapter details and speed test">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4m8-4v4M6 7h12v3a6 6 0 01-12 0zM12 16v2a3 3 0 003 3h3"/></svg>
+    <span class="txt"><b id="cable-title">Detecting adapter…</b><small id="cable-sub"></small></span>
+  </button>
   <div class="conn" title="PS5 address on the direct cable">
-    <span class="dot" id="dot"></span>
-    <span class="label">PS5</span>
+    <span class="label">PS5 IP</span>
     <input id="host" type="text" spellcheck="false" placeholder="192.168.88.2">
     <button class="primary" id="btn-connect">Connect</button>
   </div>
@@ -240,7 +317,9 @@
       <label title="Skip files that are already complete and continue partial ones"><input type="checkbox" id="opt-resume"> Skip / resume existing</label>
       <label title="Parallel connections. More helps with many small files">Parallel <input type="number" id="opt-jobs" min="1" max="16"></label>
       <label><input type="checkbox" id="opt-hidden"> Show hidden</label>
+      <label title="When the PS5's ELF loader is found on the cable, start ps5cable on it automatically"><input type="checkbox" id="opt-auto"> Auto-start payload</label>
     </div>
+    <div class="tip" id="pkg-tip" hidden></div>
   </div>
   <section class="pane" id="pane-remote"></section>
 </main>
@@ -370,9 +449,10 @@ class Pane {
     const r = this.root;
     r.innerHTML = "";
     this.freeEl = el("span", { class: "free" });
+    this.linkEl = el("span", { class: "linkchip", hidden: this.isLocal });
     r.append(el("div", { class: "pane-head" },
       el("h2", { html: (this.isLocal ? ICONS.pc : ICONS.ps5) + (this.isLocal ? "This PC" : "PlayStation 5") }),
-      this.freeEl));
+      this.linkEl, this.freeEl));
     this.placesEl = el("div", { class: "places" });
     r.append(this.placesEl);
     this.crumbsEl = el("div", { class: "crumbs", ondblclick: () => this.editPath() });
@@ -381,6 +461,9 @@ class Pane {
     const tb = el("div", { class: "toolbar" },
       el("button", { class: "icon", title: "Up one level", html: ICONS.up, onclick: () => this.parent && this.load(this.parent) }),
       this.crumbsEl, this.filterEl,
+      this.isLocal ? null : el("button", { title: "Folders where PS5 tools look for games and packages",
+        html: ICONS.folder.replace("<svg", '<svg style="color:#f7c948"') + "Game folders",
+        onclick: (e) => { e.stopPropagation(); openGameFolders(e.currentTarget); } }),
       el("button", { class: "icon", title: "Refresh", html: ICONS.refresh, onclick: () => this.load(this.path) }));
     r.append(tb);
     this.listEl = el("div", { class: "list" });
@@ -610,18 +693,23 @@ class Pane {
 let dragSide = null;
 
 function disconnectedCard() {
-  const err = app.status && app.status.error;
+  const st = app.status || { state: "offline" };
+  const ip = app.settings ? app.settings.host : "192.168.88.2";
+  const cable = st.state !== "offline";
+  const loader = ["loader", "starting", "connected"].includes(st.state);
+  const step = (done, active, ...text) => el("li", { class: done ? "done" : active ? "active" : "" },
+    el("span", { class: "tick" }, done ? "✓" : ""), el("span", {}, ...text));
   return el("div", { class: "empty" }, el("div", { class: "card" },
     el("div", { html: ICONS.plug.replace("<svg", '<svg class="big"') }),
-    el("h3", {}, "PS5 not connected"),
-    el("ol", {},
-      el("li", {}, "Cable plugged in, PS5 on LAN with IP ", el("code", {}, app.settings ? app.settings.host : "192.168.88.2")),
-      el("li", {}, "Run your jailbreak (ELF loader on port 9021)"),
-      el("li", {}, "Click ", el("b", {}, "Send payload"), ", then ", el("b", {}, "Connect"))),
+    el("h3", {}, cable ? "PS5 found on the cable" : "PS5 not connected"),
+    el("ol", { class: "steps" },
+      step(cable, !cable, "Cable plugged in, PS5 set to LAN with IP ", el("code", {}, ip)),
+      step(loader, cable && !loader, "Jailbreak running (ELF loader on port 9021)"),
+      step(false, loader, st.state === "starting" ? "Starting ps5cable…" : "ps5cable payload running")),
     el("div", { style: "display:flex; gap:8px" },
-      el("button", { class: "primary", onclick: sendPayload }, "Send payload"),
-      el("button", { onclick: () => connect() }, "Retry")),
-    err ? el("small", { style: "color:#6b7689" }, err) : null));
+      el("button", { class: "primary", onclick: sendPayload, disabled: !cable }, "Send payload"),
+      el("button", { onclick: () => connect() }, "Check again")),
+    el("small", { style: "color:#6b7689" }, linkSubtitle(st))));
 }
 
 const local = new Pane("local");
@@ -633,15 +721,52 @@ function updateRail() {
   down.disabled = !app.connected || remote.sel.size === 0 || !local.path;
   $("up-sum").textContent = local.sel.size ? local.summaryText : "select files on the PC";
   $("down-sum").textContent = remote.sel.size ? remote.summaryText : "select files on the PS5";
+  const names = [...local.sel].map((n) => n.toLowerCase());
+  const tips = [];
+  if (names.some((n) => n.endsWith(".pkg") || n.endsWith(".fpkg")))
+    tips.push(".pkg files are copied, not installed. Install them afterwards with etaHEN or ps5upload's Install Package.");
+  if (names.some((n) => /\.(exfat|ffpkg|ffpfs|ffpfsc)$/.test(n)))
+    tips.push("Game images mount through ShadowMount+: send them to a homebrew folder (see Game folders).");
+  $("pkg-tip").hidden = !tips.length;
+  $("pkg-tip").textContent = tips.join(" ");
 }
 
 // ---------------------------------------------------------------- connection
+
+const LINK_TEXT = {
+  connected: ["PS5 Connected", "ok"],
+  starting: ["Starting ps5cable on the PS5…", "warn"],
+  loader: ["PS5 found on cable", "warn"],
+  reachable: ["PS5 found on cable", "warn"],
+  offline: ["PS5 not connected", ""],
+};
+
+function linkSubtitle(st) {
+  const ip = st.host || (app.settings && app.settings.host) || "";
+  switch (st.state) {
+    case "connected": return `Cable link OK · ${ip}${st.local_ip ? " ⇄ PC " + st.local_ip : ""}`;
+    case "starting": return "Payload sent, waiting for it to start";
+    case "loader": return st.auto_payload ? "Starting payload…" : "Click Send payload to start ps5cable";
+    case "reachable": return "Run your jailbreak (ELF loader on port 9021)";
+    default:
+      if (st.same_subnet === false) return `No ${ip.replace(/\.\d+$/, ".x")} address on this PC. Plug in the cable`;
+      return `No answer from ${ip}. Check cable & PS5 LAN settings`;
+  }
+}
 
 function applyStatus(st) {
   const was = app.connected;
   app.status = st;
   app.connected = !!st.connected;
-  $("dot").classList.toggle("on", app.connected);
+  const [title, cls] = LINK_TEXT[st.state] || LINK_TEXT.offline;
+  const link = $("link");
+  link.className = "link" + (cls ? " " + cls : "");
+  $("link-title").textContent = title;
+  $("link-sub").textContent = linkSubtitle(st);
+  link.title = st.error || linkSubtitle(st);
+  document.title = (app.connected ? "PS5 Connected" : title) + " · ps5cable Hub";
+  remote.linkEl.textContent = app.connected ? "Connected" : (cls === "warn" ? "Found" : "Offline");
+  remote.linkEl.className = "linkchip" + (app.connected ? " ok" : "");
   $("btn-connect").textContent = app.connected ? "Connected" : "Connect";
   $("btn-connect").classList.toggle("primary", !app.connected);
   const m = $("ps5-meter");
@@ -654,10 +779,149 @@ function applyStatus(st) {
       remote.freeEl.textContent = `${human(st.free)} free`;
     }
   } else remote.freeEl.textContent = "";
-  if (app.connected && !was) remote.load(remote.path || app.settings.remote_dir);
+  if (app.connected && !was) {
+    toast("PS5 connected over the cable", "ok");
+    loadRemotePlaces();
+    remote.load(remote.path || app.settings.remote_dir);
+  }
   if (!app.connected && was) { remote.renderList(); toast("Lost connection to the PS5", "err"); }
   if (!app.connected && !was) remote.renderList();
+  renderCable(st.link);
   remote.renderActions(); updateRail();
+  clearTimeout(app.statusTimer);
+  app.statusTimer = setTimeout(pollStatus, app.connected ? 5000 : 2000);
+}
+
+// ---------------------------------------------------------------- cable / adapter
+
+const fmtRate = (v) => v == null ? "—" : `${v >= 10 ? Math.round(v) : v.toFixed(1)} MB/s`;
+const fmtMbps = (v) => v == null ? null : v >= 1000 ? `${v / 1000} Gbps` : `${v} Mbps`;
+
+function renderCable(link) {
+  const b = $("cable");
+  if (!link) { b.hidden = true; return; }
+  b.hidden = false;
+  b.className = "cable" + (["ok", "warn", "bad"].includes(link.level) ? " " + link.level : "");
+  $("cable-title").textContent = link.summary || link.connection || "Unknown adapter";
+  const st = app.status && app.status.speedtest;
+  let sub;
+  if (link.bus === "virtual") sub = "No cable adapter in use";
+  else if (link.link_down) sub = "No Ethernet link on the adapter";
+  else if (st) sub = `Measured ${fmtRate(Math.min(st.up_mbs, st.down_mbs))} · max ~${fmtRate(link.expected_mbs)}`;
+  else sub = `Max ~${fmtRate(link.expected_mbs)} · limited by ${link.bottleneck.replace(/ \(.*/, "")}`;
+  $("cable-sub").textContent = sub;
+  b.title = (link.notes || []).join("\n") || "Cable / adapter details and speed test";
+  if (app.cablePanel) app.cablePanel.render();
+}
+
+function openCablePanel() {
+  if (app.cablePanel) return;
+  const body = el("div", { style: "display:grid; gap:14px" });
+  const runBtn = el("button", { class: "primary" }, "Run speed test");
+  const close = () => { bg.remove(); app.cablePanel = null; };
+  const bg = el("div", { class: "modal-bg", onclick: (e) => { if (e.target === bg) close(); } },
+    el("div", { class: "modal wide" },
+      el("h3", {}, "Cable & adapter"), body,
+      el("div", { class: "row" }, el("button", { onclick: close }, "Close"), runBtn)));
+  let running = false;
+
+  const render = () => {
+    const link = (app.status && app.status.link) || {};
+    const st = app.status && app.status.speedtest;
+    const usb = link.usb_label || (link.bus === "usb" ? "Not reported by the OS (run a speed test)" : null);
+    const ids = link.vendor_id && link.product_id ? ` (${link.vendor_id}:${link.product_id})` : "";
+    const facts = [
+      ["Adapter", (link.chip || link.description || "Unknown") + ids],
+      ["Connection", link.connection],
+      ["Interface", [link.interface, link.local_ip].filter(Boolean).join(" · ")],
+      ["USB link", usb],
+      ["Ethernet link", link.link_down ? "No link" : fmtMbps(link.link_mbps) || "Unknown"],
+      ["Adapter rated", link.adapter_max_mbps ? `${fmtMbps(link.adapter_max_mbps)} Ethernet` +
+        (link.adapter_usb_mbps ? ` over ${link.adapter_usb_mbps <= 480 ? "USB 2.0" : "USB 3"}` : "") : null],
+      ["PS5 port", "1 Gbps Ethernet (built in)"],
+      ["Best case", `${fmtRate(link.expected_mbs)}  ·  ~${((link.expected_mbs || 0) * 60 / 1024).toFixed(1)} GB per minute`],
+    ].filter(([, v]) => v);
+    const dl = el("dl", { class: "facts" }, facts.map(([k, v]) =>
+      [el("dt", {}, k), el("dd", { class: k === "Best case" ? "hl" : null }, v)]));
+
+    const rows = (link.limits || []).map((l) => ({ name: l.name, mbs: l.mbs, limit: l.name === link.bottleneck }));
+    if (st) rows.push({ name: "Measured (upload)", mbs: st.up_mbs }, { name: "Measured (download)", mbs: st.down_mbs });
+    const scale = Math.max(...rows.map((r) => r.mbs), 1);
+    const bars = el("div", { class: "bars" }, rows.map((r) => el("div", { class: "b" + (r.limit ? " limit" : "") },
+      el("span", { title: r.limit ? "Slowest part of the chain" : "" }, r.name + (r.limit ? " ◂ limit" : "")),
+      el("div", { class: "track" }, el("i", { style: `width:${Math.max(2, 100 * r.mbs / scale).toFixed(1)}%` })),
+      el("span", {}, fmtRate(r.mbs)))));
+
+    const notes = (link.notes || []).length
+      ? el("ul", { class: "notes " + (link.level || "") }, link.notes.map((n) => el("li", {}, n))) : null;
+    const result = st ? el("div", { class: "st-result" },
+      el("div", { class: "nums" },
+        el("span", {}, "Upload ", el("b", {}, fmtRate(st.up_mbs))),
+        el("span", {}, "Download ", el("b", {}, fmtRate(st.down_mbs))),
+        el("span", { style: "color:#8b95a7; align-self:end" }, `at ${new Date(st.at * 1000).toLocaleTimeString()}`)),
+      el("ul", { class: "notes " + st.verdict }, st.notes.map((n) => el("li", {}, n)))) : null;
+    body.replaceChildren(dl, bars, notes || "", result || "");
+    runBtn.disabled = running || !app.connected;
+    runBtn.textContent = running ? "Testing… (about 6 s)" : st ? "Run again" : "Run speed test";
+    runBtn.title = app.connected ? "Sends and receives test data in memory; nothing is written to the PS5"
+                                 : "Connect to the PS5 first";
+  };
+
+  runBtn.addEventListener("click", async () => {
+    running = true; render();
+    try {
+      const r = await api("POST", "/api/speedtest", {});
+      app.status.speedtest = r;
+      toast(`Speed test: ${fmtRate(r.up_mbs)} up, ${fmtRate(r.down_mbs)} down`, r.verdict === "ok" ? "ok" : "err");
+    } catch (e) { toast(e.message, "err"); }
+    running = false;
+    renderCable(app.status.link);
+    render();
+  });
+  app.cablePanel = { render };
+  render();
+  document.body.append(bg);
+}
+
+async function pollStatus() {
+  try { applyStatus((await api("GET", "/api/state")).status); }
+  catch (e) { app.statusTimer = setTimeout(pollStatus, 3000); }
+}
+
+async function loadRemotePlaces(refresh) {
+  try {
+    const d = await api("GET", "/api/remote/places" + (refresh ? "?refresh=1" : ""));
+    remote.places = d.places; app.gameFolders = d.game_folders;
+    remote.renderPlaces();
+  } catch (e) { /* not connected yet */ }
+}
+
+function openGameFolders(anchor) {
+  document.querySelectorAll(".menu").forEach((m) => m.remove());
+  const folders = app.gameFolders || [];
+  const menu = el("div", { class: "menu" });
+  let group = null;
+  for (const f of folders) {
+    if (f.drive !== group) { group = f.drive; menu.append(el("h4", {}, group)); }
+    menu.append(el("button", { title: f.hint, onclick: async () => {
+      menu.remove();
+      try {
+        if (!f.exists) { await api("POST", "/api/remote/mkdir", { path: f.path }); toast(`Created ${f.path}`, "ok"); loadRemotePlaces(true); }
+        remote.load(f.path);
+      } catch (e) { toast(e.message, "err"); }
+    } },
+      el("code", {}, f.path),
+      f.recommended ? el("span", { class: "tag" }, "Recommended") : (!f.exists ? el("span", { class: "tag new" }, "Will be created") : el("span")),
+      el("small", {}, f.hint + (f.recommended && !f.exists ? " (will be created)" : ""))));
+  }
+  if (!folders.length) menu.append(el("div", { style: "padding:10px; color:#8b95a7" }, "Connect to the PS5 to see its drives."));
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = `${r.bottom + 6}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 440))}px`;
+  document.body.append(menu);
+  setTimeout(() => document.addEventListener("click", function off(e) {
+    if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", off); }
+  }), 0);
 }
 
 async function connect(host) {
@@ -667,7 +931,7 @@ async function connect(host) {
     const st = await api("POST", "/api/connect", host ? { host } : {});
     if (host || !app.settings) app.settings = (await api("GET", "/api/state")).settings;
     applyStatus(st);
-    if (!st.connected && host) toast(`No answer from ${st.host}:${st.port}. Is the payload running?`, "err");
+    if (!st.connected && host) toast(`${LINK_TEXT[st.state][0]}: ${linkSubtitle(st)}`, "err");
   } catch (e) { toast(e.message, "err"); }
   finally { btn.disabled = false; }
 }
@@ -779,20 +1043,20 @@ async function boot() {
   $("host").value = st.settings.host;
   $("opt-resume").checked = !!st.settings.resume;
   $("opt-jobs").value = st.settings.jobs;
-  local.places = st.local_places; remote.places = st.remote_places;
+  $("opt-auto").checked = !!st.settings.auto_payload;
+  local.places = st.local_places;
+  remote.places = [{ name: "Internal", path: "/data" }, { name: "Homebrew", path: "/data/homebrew" }];
   if (!st.payload) $("btn-payload").title = "ps5cable.elf not found next to the app";
   local.load(st.settings.local_dir);
   remote.renderPlaces();
   applyStatus(st.status);
   pollJobs();
-  setInterval(async () => {
-    try { applyStatus((await api("GET", "/api/state")).status); } catch (e) { /* ignore */ }
-  }, 5000);
 }
 
 $("btn-connect").addEventListener("click", () => connect($("host").value.trim()));
 $("host").addEventListener("keydown", (e) => { if (e.key === "Enter") connect($("host").value.trim()); });
 $("btn-find").addEventListener("click", findPs5);
+$("cable").addEventListener("click", openCablePanel);
 $("btn-payload").addEventListener("click", sendPayload);
 $("btn-upload").addEventListener("click", () => startTransfer("upload"));
 $("btn-download").addEventListener("click", () => startTransfer("download"));
@@ -805,6 +1069,7 @@ $("btn-quit").addEventListener("click", async () => {
 });
 $("opt-resume").addEventListener("change", (e) => api("POST", "/api/settings", { resume: e.target.checked }));
 $("opt-jobs").addEventListener("change", (e) => api("POST", "/api/settings", { jobs: Number(e.target.value) || 4 }));
+$("opt-auto").addEventListener("change", (e) => api("POST", "/api/settings", { auto_payload: e.target.checked }));
 $("opt-hidden").addEventListener("change", (e) => { app.showHidden = e.target.checked; local.renderList(); remote.renderList(); });
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT") return;

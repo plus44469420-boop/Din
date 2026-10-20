@@ -29,9 +29,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import linkinfo  # noqa: E402
 import ps5cable  # noqa: E402
 
 APP_NAME = "ps5cable Hub"
+# Adapter detection shells out to PowerShell on Windows, which takes ~1 s.
+LINK_INFO_TTL = 15
 SETTINGS_PATH = Path.home() / ".ps5cable-hub.json"
 # Without a heartbeat for this long (and no transfer running) the hub exits,
 # so closing the window does not leave a hidden server behind. Background tabs
@@ -56,7 +59,8 @@ def find_payload():
 class Settings:
     DEFAULTS = {"host": ps5cable.DEFAULT_HOST, "port": ps5cable.DEFAULT_PORT,
                 "local_dir": str(Path.home()), "remote_dir": "/data",
-                "resume": True, "jobs": 4}
+                "resume": True, "jobs": 4, "auto_payload": True,
+                "loader_port": ps5cable.ELFLDR_PORT}
 
     def __init__(self, path=SETTINGS_PATH):
         self.path = path
@@ -147,6 +151,15 @@ class Hub:
         self.jobs = {}
         self.jobs_lock = threading.Lock()
         self.last_seen = time.monotonic()
+        self.status_lock = threading.Lock()
+        self.status_cache = None
+        self.places_cache = None
+        self.payload_sent_at = -1e9
+        self.payload_lock = threading.Lock()
+        self.link_cache = (None, None, -1e9)  # (local_ip, info, monotonic time)
+        self.link_lock = threading.Lock()
+        self.speedtest_lock = threading.Lock()
+        self.last_speedtest = None
 
     # --- PS5 helpers --------------------------------------------------------
 
@@ -157,19 +170,85 @@ class Hub:
         host, port = self.target()
         return ps5cable.Connection(host, port, timeout=timeout)
 
-    def status(self):
+    def refresh_status(self):
+        """Probes the cable and, when the PS5's ELF loader is up but our payload
+        is not, sends the payload so plugging in is all it takes."""
         host, port = self.target()
-        try:
-            with ps5cable.Connection(host, port, timeout=1.5) as c:
-                _, banner = c.ping()
+        loader_port = int(self.settings.get("loader_port"))
+        st = ps5cable.probe(host, port, loader_port)
+        if st["state"] == "loader" and self.settings.get("auto_payload"):
+            with self.payload_lock:
+                due = time.monotonic() - self.payload_sent_at > 20
+                if due:
+                    self.payload_sent_at = time.monotonic()
+            elf = find_payload() if due else None
+            if elf:
                 try:
-                    free, total = c.df("/data")
-                except ps5cable.RemoteError:
-                    free = total = None
-            return {"connected": True, "host": host, "port": port,
-                    "banner": banner, "free": free, "total": total}
-        except OSError as e:
-            return {"connected": False, "host": host, "port": port, "error": str(e)}
+                    send_elf(host, loader_port, elf)
+                    st["state"] = "starting"
+                except OSError as e:
+                    st["error"] = f"auto-send failed: {e}"
+        st["connected"] = st["state"] == "connected"
+        st["auto_payload"] = bool(self.settings.get("auto_payload"))
+        prev_state = (self.status_cache or {}).get("state")
+        st["link"] = self.link_info(st.get("local_ip"), force=prev_state != st["state"])
+        st["speedtest"] = self.last_speedtest
+        with self.status_lock:
+            prev = self.status_cache
+            self.status_cache = st
+        if st["connected"] and not (prev and prev.get("connected")):
+            self.places_cache = None
+        return st
+
+    def status(self):
+        with self.status_lock:
+            st = self.status_cache
+        st = dict(st) if st is not None else self.refresh_status()
+        st["speedtest"] = self.last_speedtest
+        return st
+
+    def monitor(self):
+        while True:
+            try:
+                st = self.refresh_status()
+            except Exception as e:  # keep the monitor alive whatever happens
+                st = {"connected": False, "state": "offline", "error": str(e)}
+                with self.status_lock:
+                    self.status_cache = st
+            time.sleep(5 if st.get("connected") else 2)
+
+    def link_info(self, local_ip, force=False):
+        """Adapter type and speed limits for the interface facing the PS5."""
+        with self.link_lock:
+            ip, info, at = self.link_cache
+            if force or ip != local_ip or time.monotonic() - at > LINK_INFO_TTL:
+                info = linkinfo.detect(local_ip)
+                self.link_cache = (local_ip, info, time.monotonic())
+                if ip != local_ip:
+                    self.last_speedtest = None
+            return info
+
+    def speed_test(self, seconds):
+        if not self.speedtest_lock.acquire(blocking=False):
+            raise ApiError("A speed test is already running.", HTTPStatus.CONFLICT)
+        try:
+            with self.conn(timeout=15) as c:
+                raw = c.speed_test(seconds=seconds)
+            st = self.status()
+            info = st.get("link") or self.link_info(st.get("local_ip"))
+            result = linkinfo.interpret_speedtest(info, raw["up_mbs"], raw["down_mbs"])
+            result["at"] = time.time()
+            result["expected_mbs"] = info.get("expected_mbs")
+            self.last_speedtest = result
+            return result
+        finally:
+            self.speedtest_lock.release()
+
+    def remote_places(self):
+        if self.places_cache is None:
+            with self.conn() as c:
+                self.places_cache = build_remote_places(c)
+        return self.places_cache
 
     # --- jobs ---------------------------------------------------------------
 
@@ -293,15 +372,85 @@ def remote_list(hub, path):
     return {"path": path, "parent": parent, "sep": "/", "entries": entries}
 
 
-REMOTE_PLACES = [
-    {"name": "Internal /data", "path": "/data"},
-    {"name": "Homebrew", "path": "/data/homebrew"},
-    {"name": "USB 1", "path": "/mnt/usb0"},
-    {"name": "USB 2", "path": "/mnt/usb1"},
-    {"name": "M.2 / ext", "path": "/mnt/ext0"},
-    {"name": "Apps", "path": "/user/app"},
-    {"name": "Root /", "path": "/"},
+# Folder conventions the PS5 scene tools already scan, as used by ps5upload
+# (github.com/phantomptr/ps5upload): ShadowMount+ mounts game images and
+# folders from <drive>/homebrew unless /data/shadowmount/config.ini lists
+# its own `scanpath=` entries, etaHEN's loader scans <drive>/etaHEN/games, and
+# ps5upload keeps uploaded packages in /user/data/ps5upload/pkg_library.
+SMP_CONFIG = "/data/shadowmount/config.ini"
+DRIVE_CANDIDATES = (["/data", "/mnt/ext0", "/mnt/ext1"]
+                    + [f"/mnt/usb{i}" for i in range(8)])
+GAME_SUBDIRS = [
+    ("homebrew", "Games & homebrew (recommended). ShadowMount+ scans here by default"),
+    ("etaHEN/games", "etaHEN game folder. etaHEN's app loader scans here"),
+    ("exfat", "Game images (.exfat / .ffpkg / .ffpfs)"),
 ]
+PKG_LIBRARY = "/user/data/ps5upload/pkg_library"
+
+
+def drive_label(path):
+    if path == "/data":
+        return "Internal"
+    name = posixpath.basename(path)
+    if name.startswith("usb"):
+        return f"USB {int(name[3:]) + 1}"
+    if name.startswith("ext"):
+        return "M.2 / Extended" + ("" if name == "ext0" else f" {int(name[3:]) + 1}")
+    return path
+
+
+def parse_scan_paths(ini):
+    out = []
+    for line in ini.splitlines():
+        line = line.strip()
+        if line.startswith(("#", ";")) or "=" not in line:
+            continue
+        key, value = (x.strip() for x in line.split("=", 1))
+        if key.lower() == "scanpath" and value:
+            out.append(value.rstrip("/") or "/")
+    return out
+
+
+def build_remote_places(conn):
+    def is_dir(p):
+        st = conn.stat(p)
+        return bool(st) and st[0] == ps5cable.KIND_DIR
+
+    drives = [d for d in DRIVE_CANDIDATES if is_dir(d)]
+    scan_paths = []
+    try:
+        ini = conn.read_small(SMP_CONFIG, 256 * 1024)
+        scan_paths = parse_scan_paths(ini.decode("utf-8", "replace"))
+    except (ps5cable.RemoteError, OSError, ValueError):
+        pass
+
+    folders = []
+    for d in drives:
+        for sub, hint in GAME_SUBDIRS:
+            p = f"{d}/{sub}"
+            folders.append({"drive": drive_label(d), "path": p, "hint": hint,
+                            "exists": is_dir(p),
+                            "recommended": sub == "homebrew"})
+    for p in scan_paths:
+        if not any(f["path"] == p for f in folders):
+            folders.append({"drive": "ShadowMount+ config", "path": p,
+                            "hint": "Listed as a scanpath in ShadowMount+'s config.ini",
+                            "exists": is_dir(p), "recommended": False})
+    folders.append({"drive": "Packages", "path": PKG_LIBRARY,
+                    "hint": "Where ps5upload keeps .pkg files. Packages still have to be "
+                            "installed afterwards (ps5upload or etaHEN)",
+                    "exists": is_dir(PKG_LIBRARY), "recommended": False})
+
+    places = [{"name": drive_label(d), "path": d, "drive": True} for d in drives]
+    places.insert(1 if drives else 0, {"name": "Homebrew", "path": "/data/homebrew"})
+    places += [{"name": "Apps", "path": "/user/app"}, {"name": "Root /", "path": "/"}]
+    return {"places": places, "game_folders": folders, "scan_paths": scan_paths}
+
+
+def send_elf(host, loader_port, path):
+    data = Path(path).read_bytes()
+    with socket.create_connection((host, loader_port), timeout=5) as s:
+        s.sendall(data)
 
 
 # --- HTTP -------------------------------------------------------------------
@@ -398,8 +547,7 @@ def _require(args, *keys):
 def api_state(hub, args):
     return {"app": APP_NAME, "settings": hub.settings.snapshot(),
             "status": hub.status(), "payload": str(find_payload() or ""),
-            "local_places": local_places(), "remote_places": REMOTE_PLACES,
-            "os": os.name}
+            "local_places": local_places(), "os": os.name}
 
 
 def api_heartbeat(hub, args):
@@ -407,8 +555,9 @@ def api_heartbeat(hub, args):
 
 
 def api_settings(hub, args):
-    if "port" in args:
-        args["port"] = int(args["port"])
+    for key in ("port", "loader_port"):
+        if key in args:
+            args[key] = int(args[key])
     if "jobs" in args:
         args["jobs"] = max(1, min(16, int(args["jobs"])))
     return {"settings": hub.settings.update(**args)}
@@ -417,7 +566,31 @@ def api_settings(hub, args):
 def api_connect(hub, args):
     if args.get("host"):
         hub.settings.update(host=args["host"].strip())
-    return hub.status()
+    return hub.refresh_status()
+
+
+def api_remote_places(hub, args):
+    if not hub.status().get("connected"):
+        raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
+    if args.get("refresh"):
+        hub.places_cache = None
+    return hub.remote_places()
+
+
+def api_link(hub, args):
+    st = hub.status()
+    return {"link": hub.link_info(st.get("local_ip"), force=bool(args.get("refresh"))),
+            "speedtest": hub.last_speedtest}
+
+
+def api_speedtest(hub, args):
+    if not hub.status().get("connected"):
+        raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
+    if hub.busy():
+        raise ApiError("Wait for the current transfer to finish; it would skew the result.",
+                       HTTPStatus.CONFLICT)
+    seconds = max(1.0, min(10.0, float(args.get("seconds") or 3)))
+    return hub.speed_test(seconds)
 
 
 def api_discover(hub, args):
@@ -429,14 +602,12 @@ def api_send_payload(hub, args):
     path = Path(args["path"]) if args.get("path") else find_payload()
     if not path or not path.is_file():
         raise ApiError("ps5cable.elf not found. Put it next to the app or pick it.")
-    host = hub.settings.get("host")
-    data = path.read_bytes()
-    with socket.create_connection((host, int(args.get("loader_port") or ps5cable.ELFLDR_PORT)),
-                                  timeout=5) as s:
-        s.sendall(data)
+    hub.payload_sent_at = time.monotonic()
+    send_elf(hub.settings.get("host"),
+             int(args.get("loader_port") or hub.settings.get("loader_port")), path)
     for _ in range(16):
         time.sleep(0.5)
-        st = hub.status()
+        st = hub.refresh_status()
         if st["connected"]:
             return st
     raise ApiError("Payload sent, but it did not answer. Check the PS5 screen.",
@@ -484,6 +655,7 @@ def api_remote_mkdir(hub, args):
     _require(args, "path")
     with hub.conn() as c:
         c.mkdir(args["path"])
+    hub.places_cache = None
     return {"ok": True}
 
 
@@ -494,6 +666,7 @@ def api_remote_delete(hub, args):
             if p in ("/", ""):
                 raise ApiError("refusing to delete /")
             c.delete(p, recursive=True)
+    hub.places_cache = None
     return {"ok": True}
 
 
@@ -501,6 +674,7 @@ def api_remote_rename(hub, args):
     _require(args, "src", "dst")
     with hub.conn() as c:
         c.rename(args["src"], args["dst"])
+    hub.places_cache = None
     return {"ok": True}
 
 
@@ -541,8 +715,11 @@ ROUTES = {
     ("GET", "/api/jobs"): api_heartbeat,
     ("GET", "/api/local/list"): api_local_list,
     ("GET", "/api/remote/list"): api_remote_list,
+    ("GET", "/api/remote/places"): api_remote_places,
     ("POST", "/api/settings"): api_settings,
     ("POST", "/api/connect"): api_connect,
+    ("GET", "/api/link"): api_link,
+    ("POST", "/api/speedtest"): api_speedtest,
     ("POST", "/api/discover"): api_discover,
     ("POST", "/api/send-payload"): api_send_payload,
     ("POST", "/api/local/mkdir"): api_local_mkdir,
@@ -615,6 +792,7 @@ def main(argv=None):
     print(f"{APP_NAME} running at {url}", flush=True)
     if not args.no_browser:
         open_app_window(url)
+    threading.Thread(target=hub.monitor, daemon=True).start()
     if not args.stay:
         threading.Thread(target=idle_watchdog, args=(hub,), daemon=True).start()
     try:
