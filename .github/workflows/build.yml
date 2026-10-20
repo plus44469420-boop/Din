@@ -1,0 +1,96 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  PS5_SDK_VERSION: v0.44
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 llvm-18
+
+      - name: Install ps5-payload-sdk
+        run: |
+          wget -q https://github.com/ps5-payload-dev/sdk/releases/download/${PS5_SDK_VERSION}/ps5-payload-sdk.zip
+          sudo unzip -q -d /opt ps5-payload-sdk.zip
+          echo "PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk" >> "$GITHUB_ENV"
+
+      - name: Build payload
+        run: make -C payload
+
+      - name: Tests
+        run: python3 -m unittest discover -s tests -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: payload
+          path: payload/ps5cable.elf
+
+  windows-app:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: payload
+          path: payload
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build ps5cable-hub.exe and ps5cable.exe
+        shell: bash
+        run: |
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
+            --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
+          pyinstaller --onefile --console --name ps5cable --paths pc pc/ps5cable.py
+
+      - name: Smoke test the hub executable
+        shell: bash
+        run: |
+          ./dist/ps5cable-hub.exe --no-browser --stay --port 8799 --settings hub-test.json > hub.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "running at" hub.log && break; sleep 1; done
+          url=$(grep -o 'http[^ ]*' hub.log)
+          curl -sf "$url" | grep -q "ps5cable Hub"
+          curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state | grep -q ps5cable.elf
+          taskkill //F //IM ps5cable-hub.exe || true
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out/ps5cable
+          cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
+             pc/ps5cable.py pc/linkinfo.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
+             pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
+             README.md LICENSE out/ps5cable/
+          (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5cable-windows
+          path: out/ps5cable
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/ps5cable-windows.zip --generate-notes

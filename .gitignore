@@ -1,0 +1,4 @@
+*.elf
+payload/ps5cable-host
+__pycache__/
+dist/

@@ -1,0 +1,217 @@
+"""End-to-end tests: the desktop build of the payload server driven by the
+real PC client. Run with: python3 -m unittest discover -s tests -v"""
+
+import contextlib
+import io
+import os
+import random
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "pc"))
+
+import ps5cable  # noqa: E402
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def run_cli(*argv):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        rc = ps5cable.main(list(argv))
+    return rc, out.getvalue()
+
+
+def tree_digest(root):
+    out = {}
+    for p in sorted(Path(root).rglob("*")):
+        rel = p.relative_to(root).as_posix()
+        out[rel] = p.read_bytes() if p.is_file() else None
+    return out
+
+
+class ServerTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        subprocess.run(["make", "-s", "host"], cwd=ROOT / "payload", check=True)
+        cls.port = free_port()
+        cls.proc = subprocess.Popen(
+            [str(ROOT / "payload" / "ps5cable-host"), "-p", str(cls.port)],
+            stdout=subprocess.DEVNULL)
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                socket.create_connection(("127.0.0.1", cls.port), timeout=0.5).close()
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.1)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ps5cable-test-"))
+        self.remote = self.tmp / "remote"
+        self.remote.mkdir()
+        self.base = ["--host", "127.0.0.1", "--port", str(self.port)]
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def conn(self):
+        return ps5cable.Connection("127.0.0.1", self.port)
+
+    def make_tree(self, root):
+        rng = random.Random(1234)
+        (root / "sce_sys" / "nested" / "deeper").mkdir(parents=True)
+        (root / "empty_dir").mkdir()
+        (root / "eboot.bin").write_bytes(rng.randbytes(9 * 1024 * 1024 + 17))
+        (root / "sce_sys" / "param.json").write_text('{"titleId": "TEST00001"}')
+        (root / "sce_sys" / "nested" / "deeper" / "zero.bin").write_bytes(b"")
+        (root / "unicode é名前.txt").write_text("héllo")
+        for i in range(40):
+            (root / "sce_sys" / f"small_{i}.dat").write_bytes(rng.randbytes(rng.randint(1, 5000)))
+
+    def test_ping(self):
+        with self.conn() as c:
+            ver, banner = c.ping()
+        self.assertEqual(ver, ps5cable.PROTO_VER)
+        self.assertIn("ps5cable", banner)
+
+    def test_put_get_roundtrip_tree(self):
+        src = self.tmp / "PPSA00000"
+        self.make_tree(src)
+
+        rc, _ = run_cli(*self.base, "put", "-j", "6", str(src), str(self.remote / "games"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(tree_digest(src), tree_digest(self.remote / "games" / "PPSA00000"))
+
+        back = self.tmp / "back"
+        rc, _ = run_cli(*self.base, "get", str(self.remote / "games" / "PPSA00000"), str(back))
+        self.assertEqual(rc, 0)
+        self.assertEqual(tree_digest(src), tree_digest(back / "PPSA00000"))
+
+    def test_put_resume_continues_partial_file(self):
+        data = random.Random(7).randbytes(6 * 1024 * 1024)
+        local = self.tmp / "big.bin"
+        local.write_bytes(data)
+        (self.remote / "big.bin").write_bytes(data[:2_500_000])
+
+        rc, out = run_cli(*self.base, "put", "--resume", str(local), str(self.remote))
+        self.assertEqual(rc, 0)
+        self.assertIn(ps5cable.human(len(data) - 2_500_000), out)
+        self.assertEqual((self.remote / "big.bin").read_bytes(), data)
+
+        rc, out = run_cli(*self.base, "put", "--resume", str(local), str(self.remote))
+        self.assertEqual(rc, 0)
+        self.assertIn("Uploading 0 files", out)
+
+    def test_get_resume_continues_partial_file(self):
+        data = random.Random(8).randbytes(5 * 1024 * 1024 + 3)
+        (self.remote / "dump.bin").write_bytes(data)
+        out_dir = self.tmp / "out"
+        out_dir.mkdir()
+        (out_dir / "dump.bin").write_bytes(data[:1234567])
+
+        rc, _ = run_cli(*self.base, "get", "--resume", str(self.remote / "dump.bin"), str(out_dir))
+        self.assertEqual(rc, 0)
+        self.assertEqual((out_dir / "dump.bin").read_bytes(), data)
+
+    def test_file_management(self):
+        with self.conn() as c:
+            c.mkdir(str(self.remote / "a" / "b" / "c"))
+            self.assertEqual(c.stat(str(self.remote / "a" / "b" / "c"))[0], ps5cable.KIND_DIR)
+            (self.remote / "a" / "b" / "f.txt").write_text("x")
+
+            names = {e[0]: e[1] for e in c.listdir(str(self.remote / "a" / "b"))}
+            self.assertEqual(names, {"c": ps5cable.KIND_DIR, "f.txt": ps5cable.KIND_FILE})
+
+            c.rename(str(self.remote / "a" / "b" / "f.txt"), str(self.remote / "g.txt"))
+            self.assertEqual((self.remote / "g.txt").read_text(), "x")
+
+            with self.assertRaises(ps5cable.RemoteError):
+                c.delete(str(self.remote / "a"))
+            c.delete(str(self.remote / "a"), recursive=True)
+            self.assertFalse((self.remote / "a").exists())
+            self.assertIsNone(c.stat(str(self.remote / "a")))
+
+            free, total = c.df(str(self.remote))
+            self.assertGreater(total, 0)
+            self.assertLessEqual(free, total)
+
+    def test_errors_keep_connection_usable(self):
+        with self.conn() as c:
+            with self.assertRaisesRegex(ps5cable.RemoteError, "No such file"):
+                c.listdir(str(self.remote / "missing"))
+            with self.assertRaisesRegex(ps5cable.RemoteError, "absolute"):
+                c.listdir("relative/path")
+            with self.assertRaises(ps5cable.RemoteError):
+                c.get_file(str(self.remote / "missing"), str(self.tmp / "x"))
+            self.assertEqual(c.ping()[0], ps5cable.PROTO_VER)
+
+    def test_put_into_unwritable_location_reports_error(self):
+        blocker = self.remote / "file_not_dir"
+        blocker.write_text("x")
+        local = self.tmp / "f.bin"
+        local.write_bytes(b"abc")
+        with self.conn() as c:
+            with self.assertRaises(ps5cable.RemoteError):
+                c.put_file(str(local), str(blocker / "child.bin"))
+            self.assertEqual(c.ping()[0], ps5cable.PROTO_VER)
+
+    def test_discovery(self):
+        found = ps5cable.discover(self.port, timeout=1.0, targets={"127.0.0.1"})
+        self.assertEqual([ip for ip, _ in found], ["127.0.0.1"])
+        self.assertTrue(found[0][1].startswith(str(self.port)))
+
+
+class SendPayloadTest(unittest.TestCase):
+    def test_streams_elf_to_loader(self):
+        received = bytearray()
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+
+        def loader():
+            conn, _ = srv.accept()
+            with conn:
+                while chunk := conn.recv(65536):
+                    received.extend(chunk)
+
+        t = threading.Thread(target=loader)
+        t.start()
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"\x7fELF" + os.urandom(100000))
+        try:
+            # Point the post-send ping at a closed port so it gives up quickly.
+            rc, out = run_cli("--host", "127.0.0.1", "--port", str(free_port()),
+                              "send-payload", f.name,
+                              "--loader-port", str(srv.getsockname()[1]))
+        finally:
+            t.join(5)
+            srv.close()
+            data = Path(f.name).read_bytes()
+            os.unlink(f.name)
+        self.assertEqual(bytes(received), data)
+        self.assertIn("Sent", out)
+        self.assertEqual(rc, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
