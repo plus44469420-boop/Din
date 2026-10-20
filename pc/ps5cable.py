@@ -388,54 +388,22 @@ def cmd_shutdown(args):
     return 0
 
 
-def _run_parallel(host, port, jobs, work, worker_fn, progress):
-    """Runs worker_fn(conn, item) for each item, one persistent connection per
-    worker thread."""
-    local = threading.local()
-    conns, conns_lock = [], threading.Lock()
-
-    def task(item):
-        if getattr(local, "conn", None) is None:
-            local.conn = Connection(host, port)
-            with conns_lock:
-                conns.append(local.conn)
-        try:
-            worker_fn(local.conn, item)
-        except Exception:
-            # A failure mid-stream leaves unread bytes on the socket, so the
-            # connection cannot be reused for the next file.
-            local.conn.close()
-            local.conn = None
-            raise
-        finally:
-            progress.file_finished()
-
-    failures = []
-    try:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            futures = {pool.submit(task, item): item for item in work}
-            for fut in as_completed(futures):
-                err = fut.exception()
-                if err:
-                    failures.append((futures[fut], err))
-    finally:
-        for c in conns:
-            c.close()
-    progress.finish()
-    for item, err in failures:
-        print(f"FAILED {item[0]}: {err}", file=sys.stderr)
-    return 1 if failures else 0
+class Cancelled(Exception):
+    """Raised from a progress callback to abort a running transfer."""
 
 
-def cmd_put(args):
-    host = resolve_host(args)
-    dest = args.remote.rstrip("/") or "/"
+def plan_upload(conn, sources, dest, resume=False):
+    """Expands local files/folders into (local, remote, size, offset) items.
+
+    Creates the remote directory skeleton (so empty folders survive) and, with
+    `resume`, drops files that are already complete on the PS5 and continues
+    partial ones. Returns (plan, skipped_count)."""
+    dest = dest.rstrip("/") or "/"
     work, dirs = [], []
-
-    for src in args.local:
+    for src in sources:
         src_path = Path(src)
         if not src_path.exists():
-            sys.exit(f"No such file or directory: {src}")
+            raise FileNotFoundError(f"No such file or directory: {src}")
         base = remote_join(dest, src_path.name)
         if src_path.is_dir():
             dirs.append(base)
@@ -450,83 +418,153 @@ def cmd_put(args):
         else:
             work.append((str(src_path), base, src_path.stat().st_size))
 
-    with Connection(host, args.port) as c:
-        if args.resume:
-            plan = []
-            for lp, rp, size in work:
-                st = c.stat(rp)
-                if st and st[0] == KIND_FILE and st[1] == size:
-                    continue
-                offset = st[1] if st and st[0] == KIND_FILE and st[1] < size else 0
-                plan.append((lp, rp, size, offset))
-        else:
-            plan = [(lp, rp, size, 0) for lp, rp, size in work]
-        for d in dirs:
-            c.mkdir(d)
-
-    skipped = len(work) - len(plan)
-    total = sum(size - off for _, _, size, off in plan)
-    print(f"Uploading {len(plan)} files ({human(total)}) to {host}:{dest}"
-          + (f", skipping {skipped} already complete" if skipped else ""))
-    progress = Progress(total, len(plan))
-    # Largest first keeps the long transfers from becoming the tail.
-    plan.sort(key=lambda w: w[2], reverse=True)
-
-    def upload(conn, item):
-        lp, rp, _, off = item
-        conn.put_file(lp, rp, off, progress.add)
-
-    return _run_parallel(host, args.port, args.jobs, plan, upload, progress)
+    plan = []
+    for lp, rp, size in work:
+        offset = 0
+        if resume:
+            st = conn.stat(rp)
+            if st and st[0] == KIND_FILE and st[1] == size:
+                continue
+            if st and st[0] == KIND_FILE and st[1] < size:
+                offset = st[1]
+        plan.append((lp, rp, size, offset))
+    for d in dirs:
+        conn.mkdir(d)
+    return plan, len(work) - len(plan)
 
 
-def cmd_get(args):
-    host = resolve_host(args)
-    src = args.remote.rstrip("/") or "/"
-    dest = Path(args.local)
+def plan_download(conn, sources, dest, resume=False):
+    """Expands PS5 files/folders into (remote, local, size, offset) items and
+    creates the local directory skeleton. Returns (plan, skipped_count)."""
+    dest = Path(dest)
     work = []
-
-    with Connection(host, args.port) as c:
-        st = c.stat(src)
+    for src in sources:
+        src = src.rstrip("/") or "/"
+        st = conn.stat(src)
         if st is None:
-            sys.exit(f"No such file or directory on PS5: {src}")
+            raise FileNotFoundError(f"No such file or directory on PS5: {src}")
         name = posixpath.basename(src) or "root"
         if st[0] == KIND_DIR:
             stack = [(src, dest / name)]
             while stack:
                 rdir, ldir = stack.pop()
                 ldir.mkdir(parents=True, exist_ok=True)
-                for ename, kind, size, _ in c.listdir(rdir):
+                for ename, kind, size, _ in conn.listdir(rdir):
                     rp = remote_join(rdir, ename)
                     if kind == KIND_DIR:
                         stack.append((rp, ldir / ename))
                     elif kind == KIND_FILE:
                         work.append((rp, ldir / ename, size))
         else:
-            target = dest / name if dest.is_dir() else dest
+            target = dest / name if dest.is_dir() or len(sources) > 1 else dest
             target.parent.mkdir(parents=True, exist_ok=True)
             work.append((src, target, st[1]))
 
     plan = []
     for rp, lp, size in work:
         offset = 0
-        if args.resume and lp.exists():
+        if resume and lp.exists():
             have = lp.stat().st_size
             if have == size:
                 continue
             if have < size:
                 offset = have
-        plan.append((rp, lp, size, offset))
+        plan.append((rp, str(lp), size, offset))
+    return plan, len(work) - len(plan)
+
+
+def run_transfers(host, port, plan, upload, jobs=4, on_bytes=None,
+                  on_file=None, cancel=None):
+    """Runs a plan from plan_upload/plan_download on `jobs` parallel
+    connections, largest files first.
+
+    on_bytes(n) is called as data moves; on_file(item, error_or_None) after
+    each file. Setting the `cancel` threading.Event stops all workers within
+    one chunk. Returns [(item, exception)] for the files that failed."""
+    local = threading.local()
+    conns, conns_lock = [], threading.Lock()
+    plan = sorted(plan, key=lambda w: w[2], reverse=True)
+
+    def progress(n):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled("cancelled")
+        if on_bytes:
+            on_bytes(n)
+
+    def task(item):
+        err = None
+        try:
+            if cancel is not None and cancel.is_set():
+                raise Cancelled("cancelled")
+            if getattr(local, "conn", None) is None:
+                local.conn = Connection(host, port)
+                with conns_lock:
+                    conns.append(local.conn)
+            src, dst, _, off = item
+            try:
+                if upload:
+                    local.conn.put_file(src, dst, off, progress)
+                else:
+                    local.conn.get_file(src, dst, off, progress)
+            except Exception:
+                # A failure mid-stream leaves unread bytes on the socket, so
+                # the connection cannot be reused for the next file.
+                local.conn.close()
+                local.conn = None
+                raise
+        except Exception as e:
+            err = e
+            raise
+        finally:
+            if on_file:
+                on_file(item, err)
+
+    failures = []
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+            futures = {pool.submit(task, item): item for item in plan}
+            for fut in as_completed(futures):
+                err = fut.exception()
+                if err:
+                    failures.append((futures[fut], err))
+    finally:
+        for c in conns:
+            c.close()
+    return failures
+
+
+def _cli_transfer(args, upload, sources, dest):
+    host = resolve_host(args)
+    with Connection(host, args.port) as c:
+        try:
+            if upload:
+                plan, skipped = plan_upload(c, sources, dest, args.resume)
+            else:
+                plan, skipped = plan_download(c, sources, dest, args.resume)
+        except FileNotFoundError as e:
+            sys.exit(str(e))
 
     total = sum(size - off for _, _, size, off in plan)
-    print(f"Downloading {len(plan)} files ({human(total)}) from {host}:{src}")
+    verb, prep = ("Uploading", "to") if upload else ("Downloading", "from")
+    where = dest if upload else ", ".join(sources)
+    print(f"{verb} {len(plan)} files ({human(total)}) {prep} {host}:{where}"
+          + (f", skipping {skipped} already complete" if skipped else ""))
     progress = Progress(total, len(plan))
-    plan.sort(key=lambda w: w[2], reverse=True)
+    failures = run_transfers(host, args.port, plan, upload, args.jobs,
+                             on_bytes=progress.add,
+                             on_file=lambda item, err: progress.file_finished())
+    progress.finish()
+    for item, err in failures:
+        print(f"FAILED {item[0]}: {err}", file=sys.stderr)
+    return 1 if failures else 0
 
-    def download(conn, item):
-        rp, lp, _, off = item
-        conn.get_file(rp, str(lp), off, progress.add)
 
-    return _run_parallel(host, args.port, args.jobs, plan, download, progress)
+def cmd_put(args):
+    return _cli_transfer(args, True, args.local, args.remote)
+
+
+def cmd_get(args):
+    return _cli_transfer(args, False, [args.remote], args.local)
 
 
 def build_parser():
