@@ -61,7 +61,7 @@ jobs:
           pip install pyinstaller
           pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
             --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." pc/hub.py
-          pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
+          pyinstaller --onefile --console --name ps5cable --paths pc pc/ps5cable.py
 
       - name: Smoke test the hub executable
         shell: bash
@@ -78,7 +78,7 @@ jobs:
         run: |
           mkdir -p out/ps5cable
           cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
-             pc/ps5cable.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
+             pc/ps5cable.py pc/linkinfo.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
              pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
              README.md LICENSE out/ps5cable/
           (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)

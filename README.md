@@ -27,6 +27,19 @@ PC USB-C ──[USB-C→Gigabit Ethernet adapter]──[Cat5e/Cat6 cable]── 
 
 Any straight-through Cat5e or Cat6 cable works. Both ends auto-detect, so you don't need a crossover cable. Any gigabit adapter works too (Realtek RTL8153/RTL8156, ASIX, Apple, Anker, UGREEN and so on); a 2.5 GbE adapter is fine but the PS5 caps the link at 1 Gb/s.
 
+### Which USB-C adapter, and how fast it can go
+
+A transfer is only as fast as the slowest part of the chain. The Hub and `ps5cable status` detect your adapter and tell you which part that is:
+
+| What's plugged in | Best case to the PS5 |
+|---|---|
+| Gigabit adapter (RTL8153, AX88179, ...) on a USB 3 / USB-C data port | ~117 MB/s (the PS5's 1 Gbps port is the limit) |
+| 2.5 / 5 GbE adapter (RTL8156, RTL8157) | ~117 MB/s (still capped by the PS5) |
+| Gigabit adapter on a **USB 2.0** port, USB 2 hub, or USB-C cable that only carries USB 2 data | ~38 MB/s |
+| Fast Ethernet adapter (RTL8152, AX88772, older Apple adapter), or a cable that only negotiates 100 Mbps | ~11 MB/s |
+
+USB-C ports look the same whatever they carry, so the app reads the actual negotiated speeds instead: on Linux the USB generation and Ethernet speed from sysfs, on macOS from `system_profiler`, and on Windows the adapter model and Ethernet speed from `Get-NetAdapter` (Windows doesn't expose the USB generation, so the speed test fills that in). The **speed test** sends and receives data in memory on the PS5, so nothing is written to its storage, and recognises the typical USB 2.0 (25-45 MB/s) and 100 Mbps (~11 MB/s) results.
+
 ## Setup (one time)
 
 ### 1. PC: give the cable a fixed address
@@ -68,10 +81,11 @@ Download **`ps5cable-windows`** from the GitHub Actions artifacts or from a rele
 
 1. Run your jailbreak as usual, so the ELF loader is listening on port **9021**.
 2. Double-click **`ps5cable-hub.exe`**. To run from source instead, use `pc\start-hub.bat`, or `python pc/hub.py` on macOS or Linux. It opens in its own window.
-3. Click **Send payload** in the top bar. The PS5 shows *"ps5cable ready on 192.168.88.2:9113"* and the dot next to the IP turns green. If you used a different IP, type it in and click **Connect**, or click **Find PS5**.
+3. Plug in the cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over the cable. If the jailbreak's ELF loader is up but ps5cable isn't running yet, the Hub sends the payload automatically (turn off **Auto-start payload** to do it yourself with **Send payload**). Amber means the PS5 is on the cable but the payload isn't running yet; red means nothing answers. If you used a different IP, type it in and click **Connect**, or click **Find PS5**.
+   - Next to it, the **cable pill** shows the adapter, its USB generation and Ethernet speed, e.g. *Realtek RTL8153 (Gigabit) · USB 3.2 Gen 1 · 1 Gbps — Max ~118 MB/s*. It turns amber or red when something slows the link down (USB 2.0 port, 100 Mbps adapter or cable, Wi-Fi). Click it for the details and a **Run speed test** button.
 4. Pick what to send:
    - The **left pane is your PC**. Use the shortcut chips for Home, Desktop, Downloads and each drive letter, double-click folders to open them, and tick the files and folders you want. Shift-click selects a range, and Ctrl-click adds single items.
-   - The **right pane is the PS5**. Its shortcut chips go to `/data`, `/data/homebrew`, USB drives and M.2 storage. Open the folder you want to copy into.
+   - The **right pane is the PS5**. Its shortcut chips go to `/data`, `/data/homebrew`, USB drives and M.2 storage. The **Game folders** menu lists the usual drop folders on every drive (see below) and creates a missing one when you click it. Open the folder you want to copy into.
    - Click **Send to PS5 →**, or just drag the selection from the left pane onto the right one.
 5. The **Transfers** panel shows each job's progress, speed and ETA, with a Cancel button. Folders are copied with everything inside.
 
@@ -80,6 +94,19 @@ Going the other way works the same way: select files on the PS5 side and click *
 **Skip / resume existing** is on by default. Files already complete on the destination are skipped, and partly copied ones continue from where they stopped, so re-running a cancelled or interrupted transfer only sends what's missing. **Parallel** sets the number of connections (default 4). The app remembers the PS5 IP and the last folder on each side.
 
 About security: the app listens only on `127.0.0.1`, and every request needs a random token created at launch, so other devices and websites can't use it. Closing the window shuts the app down after a few minutes. It stays open while transfers are running, and the ⏻ button quits immediately.
+
+### Where to put games and .pkg files
+
+These follow the conventions of [ps5upload](https://github.com/phantomptr/ps5upload), ShadowMount+ and etaHEN. `<drive>` is `/data` (internal), `/mnt/ext0` / `/mnt/ext1` (M.2 / extended storage) or `/mnt/usb0`…`/mnt/usb7` (USB drives).
+
+| Folder | Used for |
+|---|---|
+| `<drive>/homebrew` | Game folders (`PPSAxxxxx`). ShadowMount+ scans it by default; recommended. |
+| `<drive>/etaHEN/games` | Game folders for etaHEN's game loader. |
+| `<drive>/exfat` | Game images (`.exfat`, `.ffpkg`) for image mounting. |
+| `/user/data/ps5upload/pkg_library` | `.pkg` files kept for ps5upload's installer. |
+
+Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. Moving files *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; copy instead.
 
 ## Using the command line
 
@@ -110,6 +137,8 @@ About security: the app listens only on `127.0.0.1`, and every request needs a r
    python pc/ps5cable.py mv /data/a.bin /data/b.bin
    python pc/ps5cable.py rm -r /data/homebrew/old
 
+   python pc/ps5cable.py status     # connected? which adapter, and how fast it can go
+   python pc/ps5cable.py speedtest  # measure the link both ways (writes nothing on the PS5)
    python pc/ps5cable.py discover   # find the console
    python pc/ps5cable.py shutdown   # stop the payload
    ```
