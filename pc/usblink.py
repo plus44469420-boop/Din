@@ -140,7 +140,7 @@ def _access_hint():
                 "in PS5 Cable (one admin prompt).")
     if sys.platform == "darwin":
         return "Unplug the cable, close any transfer app that came with it, and plug it back in."
-    return ("No permission to open the cable. Install pc/60-ps5cable.rules into "
+    return ("No permission to open the cable. Install 60-ps5cable.rules (next to the app) into "
             "/etc/udev/rules.d/ and replug it, or run as root.")
 
 
@@ -440,7 +440,7 @@ STATE_TEXT = {
                 "between this PC and the PS5: USB-C or USB-A ends both work.",
     "no_access": "The USB bridge cable cannot be opened.",
     "no_driver": "The USB bridge cable needs the USB driver: click Install driver.",
-    "waiting": "Bridge cable found. Waiting for the ps5cable payload on the PS5; "
+    "waiting": "Bridge cable found. Waiting for the PS5 Cable payload on the PS5; "
                "load ps5cable.elf with the jailbreak.",
     "connected": "PS5 connected over USB.",
 }
@@ -633,7 +633,7 @@ class Tunnel:
                 self.banner = None
                 self._drop_all()
                 self._set("waiting", "The PS5 stopped answering over USB. Waiting for "
-                                     "the ps5cable payload.")
+                                     "the PS5 Cable payload.")
             buf = tr.recv(500)
             if buf is None:
                 continue

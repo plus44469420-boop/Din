@@ -346,7 +346,7 @@ class TunnelTest(unittest.TestCase):
         return ps5cable.Connection("127.0.0.1", self.ps5.port, timeout=5)
 
     def test_banner_and_parallel_channels(self):
-        self.assertIn("ps5cable", self.ps5.tunnel.banner)
+        self.assertIn("PS5 Cable", self.ps5.tunnel.banner)
         errors = []
 
         def worker():

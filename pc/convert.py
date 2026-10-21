@@ -226,7 +226,7 @@ class Converter:
 
     def submit(self, req):
         if not find_converter():
-            raise ConvertError("ps5cable-convert was not found next to the app.")
+            raise ConvertError("The converter (ps5cable-convert) was not found next to the app.")
         job = ConvertJob(req, build_args(req))
         with self.lock:
             self.jobs[job.id] = job

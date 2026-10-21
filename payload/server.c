@@ -208,7 +208,7 @@ rm_rf(const char *path) {
   return rmdir(path);
 }
 
-static const char version[] = "ps5cable " VERSION_TAG
+static const char version[] = "PS5 Cable " VERSION_TAG
 #ifdef __PROSPERO__
   " (ps5)";
 #else
@@ -802,7 +802,7 @@ client_thread(void *arg) {
     case CMD_DU:       rc = handle_du(fd, path); break;
     case CMD_SHUTDOWN:
       send_ok(fd);
-      plat_notify("ps5cable stopped");
+      plat_notify("PS5 Cable stopped");
       exit(EXIT_SUCCESS);
     default:
       rc = send_err(fd, "unknown command %u", req.cmd);
@@ -908,7 +908,7 @@ main(int argc, char *argv[]) {
 
   usb_start(port, version, cable);
   if(g_notify) {
-    plat_notify("ps5cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC");
+    plat_notify("PS5 Cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC");
   }
 
   for(;;) {

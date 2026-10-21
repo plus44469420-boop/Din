@@ -77,7 +77,7 @@ class ServerTest(unittest.TestCase):
         with self.conn() as c:
             ver, banner = c.ping()
         self.assertEqual(ver, ps5cable.PROTO_VER)
-        self.assertIn("ps5cable", banner)
+        self.assertIn("PS5 Cable", banner)
 
     def test_put_get_roundtrip_tree(self):
         src = self.tmp / "PPSA00000"

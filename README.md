@@ -1,12 +1,12 @@
-# ps5cable
+# PS5 Cable
 
 File transfer between a PC and a jailbroken PS5 over **one USB cable** (USB-C or USB-A ends), with no Ethernet, router or Wi-Fi. It has three parts:
 
-- **`payload/ps5cable.elf`**: a small file server that runs on the PS5 and talks to the PC over the USB cable.
-- **ps5cable Hub** (`ps5cable-hub.exe`, or `pc/hub.py`): a desktop file hub with your PC's files on one side and the PS5's on the other. You pick what to send and watch it transfer.
-- **`pc/ps5cable.py`**: the same features as a command-line tool for Windows, macOS and Linux.
+- **PS5 Cable**, the app (`PS5 Cable.exe` on Windows, `ps5-cable` on Linux and macOS): your PC's files on one side and the PS5's on the other. You pick what to send and watch it transfer. The game converter and the Windows USB driver installer are built in.
+- **`ps5cable.elf`**: the PS5 side, a small file server that the jailbreak loads and that talks to the PC over the USB cable.
+- A command line with the same features (`ps5-cable <command>`, or `python pc/ps5cable.py` from the source).
 
-![ps5cable Hub](docs/hub.png)
+![PS5 Cable](docs/hub.png)
 
 ```
 PC USB-C or USB-A ──[USB bridge ("data link") cable, PL27A1 chip]── PS5 USB-C or rear USB-A
@@ -16,7 +16,7 @@ PC USB-C or USB-A ──[USB bridge ("data link") cable, PL27A1 chip]── PS5 
 
 The PS5's USB ports and your PC's USB ports are all **USB host** ports. Two hosts joined by a plain cable don't exchange any data: USB always needs one host and one device. So a normal USB-C to USB-C, USB-A to USB-C or USB-A to USB-A cable will not work, whatever it is rated for.
 
-A **USB bridge cable** (sold as a "data link", "transfer" or "PC-to-PC" cable) has a small chip in the middle that shows up as a USB device on *both* ends and passes data from one host to the other. ps5cable drives that chip directly with its own code on each side, so the PS5 needs no network driver and nothing else gets plugged in.
+A **USB bridge cable** (sold as a "data link", "transfer" or "PC-to-PC" cable) has a small chip in the middle that shows up as a USB device on *both* ends and passes data from one host to the other. PS5 Cable drives that chip directly with its own code on each side, so the PS5 needs no network driver and nothing else gets plugged in.
 
 | Cable | Chip | Best case |
 |---|---|---|
@@ -40,7 +40,7 @@ Bridge cables come as **USB-C ⇄ USB-C**, **USB-A ⇄ USB-C** and **USB-A ⇄ U
 
 A USB-A ⇄ USB-C cable is a good fit for a PC with only USB-C ports and a PS5's rear USB-A port, or for a PC with only USB-A ports and the PS5's front USB-C port.
 
-The Hub and `ps5cable status` show the chip and the speed your PC's port negotiated, and the **speed test** measures both directions. It moves data in memory on the PS5, so nothing is written to its storage. A result around 35 MB/s means one end is on USB 2.0.
+The app and `ps5-cable status` show the chip and the speed your PC's port negotiated, and the **speed test** measures both directions. It moves data in memory on the PS5, so nothing is written to its storage. A result around 35 MB/s means one end is on USB 2.0.
 
 **Status:** the USB link is tested end to end against a stand-in for the cable, but not yet on a real PS5 with a PL27A1 cable. The PS5 side relies on the system's `libSceUsbd` library behaving like libusb, as it does on the PS4. If the PS5 never turns green with the payload running and the cable plugged in, please open an issue with the payload's `usb:` log lines.
 
@@ -50,16 +50,18 @@ The Hub and `ps5cable status` show the chip and the speed your PC's port negotia
 
 Download the latest release from [Releases](https://github.com/plus44469420-boop/Din/releases/latest):
 
-- **Windows:** `ps5cable-windows.zip`. Unzip it and run `ps5cable-hub.exe` (the desktop app, with USB support and the game converter built in). It also contains `ps5cable.exe` (the command line), `ps5cable-convert.exe` and `ps5cable.elf`.
-- **Linux:** `ps5cable-linux-x64.tar.gz`. **macOS (Apple Silicon):** `ps5cable-macos-arm64.tar.gz`. Unpack it, run `pip install -r requirements.txt` once (pyusb and libusb), then `python3 hub.py`, or `python3 ps5cable.py` for the command line. Python 3.8 or newer is needed.
-- **`ps5cable.elf` on its own**, for your payload loader.
+| Download | What's inside |
+|---|---|
+| **`PS5-Cable-Windows.zip`** (Windows 10/11) | `PS5 Cable.exe` (the app: double-click it), `ps5cable.elf` (for the PS5), `README.md`, `LICENSE.txt` |
+| **`PS5-Cable-Linux.tar.gz`** / **`PS5-Cable-macOS.tar.gz`** (Apple Silicon) | `ps5-cable` (run it to open the app), `ps5cable.elf`, `README.md`, `LICENSE`, and `app/` with the program files. Needs Python 3.8+; the first run sets up USB support (pyusb, libusb) by itself. |
+| `ps5cable.elf` | The PS5 side on its own, for your payload loader. |
 
 You can also build everything yourself, as described in Building below.
 
 ### 2. PC: let the app open the cable
 
 - **Windows:** the cable needs Windows' own **WinUSB** driver, once, and the app installs it: plug the cable into the PC, click **Install driver** on the PS5 side of the app, and OK the Windows admin prompt. No Zadig needed. The app does what Zadig does: it writes a small driver file that points the cable (USB ID 067B 27A1 or 067B 25A1) at WinUSB, which is part of Windows; signs it with a certificate made on your PC just for this, whose private key is deleted straight after so it can't sign anything else; and puts it on the cable, replacing any driver that came with the cable's transfer software. **Rescan USB** lists every USB device the PC sees, so you can check the cable shows up. If it doesn't, the cable may be showing its built-in "transfer software" drive instead: some cables have a mode switch, or need that software ejected first.
-- **Linux:** run `sudo cp pc/60-ps5cable.rules /etc/udev/rules.d/ && sudo udevadm control --reload`, then replug the cable. The app detaches the kernel's `plusb` network driver from the cable by itself.
+- **Linux:** run `sudo cp app/60-ps5cable.rules /etc/udev/rules.d/ && sudo udevadm control --reload`, then replug the cable. The app detaches the kernel's `plusb` network driver from the cable by itself.
 - **macOS:** nothing to install.
 
 ### 3. PS5: run the payload
@@ -68,14 +70,14 @@ The payload has to be running on the PS5 before the PC can talk to it, and it ca
 
 1. Copy `ps5cable.elf` to a USB stick, plug it into the PS5 and use your File Manager to copy it to the PS5 (for example to `/data/ps5cable/`).
 2. Load it with your jailbreak's payload loader after the jailbreak runs. Most loaders can load an ELF from a file, and most autoloaders can start it on every jailbreak (for example by listing it in the autoloader's `autoload.txt`, or putting it in etaHEN's payload folder). Check your jailbreak's own instructions for where it looks.
-3. The PS5 shows **"ps5cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC"**. Loading it again replaces the running copy.
+3. The PS5 shows **"PS5 Cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC"**. Loading it again replaces the running copy.
 
-Then plug the cable into the PS5. The payload finds it within a second, and the PS5 shows **"ps5cable: PC connected over USB"** when the PC app connects.
+Then plug the cable into the PS5. The payload finds it within a second, and the PS5 shows **"PS5 Cable: PC connected over USB"** when the PC app connects.
 
-## Using ps5cable Hub (the desktop app)
+## Using the app
 
 1. Run your jailbreak and load the payload (setup step 3).
-2. Double-click **`ps5cable-hub.exe`**. To run from source instead, use `pc\start-hub.bat`, or `python pc/hub.py` on macOS or Linux. It opens in its own window.
+2. Double-click **`PS5 Cable.exe`**, or run `./ps5-cable` on Linux and macOS. It opens in its own window. From the source, use `pc\start-hub.bat` or `python pc/hub.py`.
 3. Plug in the USB cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over USB. Amber means the cable is there but the PS5 isn't answering yet (payload not running, or the other end not plugged in) or that Windows still needs the USB driver; red means no cable is plugged into the PC. While it's not connected, the PS5 pane lists the steps still missing, with **Rescan USB** (look again now and list the PC's USB devices) and, on Windows, **Install driver**.
    - Next to it, the **cable pill** shows the bridge chip and the USB speed your PC's port negotiated, e.g. *Prolific PL27A1 · USB 3.2 Gen 1 — Max ~250 MB/s*. It turns amber when something limits the link (a USB 2.0 port or a USB 2.0 bridge). Click it for the details and a **Run speed test** button.
 4. Pick what to send:
@@ -98,7 +100,7 @@ The PS5 pane is a file manager for the console, so you can clean up and reorgani
 - **Right-click** an item for all of these, plus **Download to PC** and **Copy path**.
 - Shortcuts: **Del** delete, **F2** rename, **Ctrl+C / Ctrl+X / Ctrl+V** copy, cut and paste between PS5 folders, **Ctrl+A** select all, **Enter** open a folder, **Backspace** go up.
 
-System folders are locked (🔒) and can't be deleted, renamed or moved from the Hub. That covers every top-level folder (`/system`, `/data`, `/user`, `/mnt`…), anything under `/system*`, `/preinst*` and `/update`, drive mount points such as `/mnt/usb0`, and `/user/app`, `/user/home` and the like. Everything below those, such as `/data/homebrew/PPSA01234` or `/mnt/usb0/homebrew`, is yours to manage. Deleting an installed game's folder from `/user/app` is possible but leaves a broken tile; uninstall from the PS5 instead.
+System folders are locked (🔒) and can't be deleted, renamed or moved from the app. That covers every top-level folder (`/system`, `/data`, `/user`, `/mnt`…), anything under `/system*`, `/preinst*` and `/update`, drive mount points such as `/mnt/usb0`, and `/user/app`, `/user/home` and the like. Everything below those, such as `/data/homebrew/PPSA01234` or `/mnt/usb0/homebrew`, is yours to manage. Deleting an installed game's folder from `/user/app` is possible but leaves a broken tile; uninstall from the PS5 instead.
 
 **Skip / resume existing** is on by default. Files already complete on the destination are skipped, and partly copied ones continue from where they stopped, so re-running a cancelled or interrupted transfer only sends what's missing. **Parallel** sets the number of connections (default 4). The app remembers the last folder on each side.
 
@@ -115,7 +117,7 @@ These follow the conventions of [ps5upload](https://github.com/phantomptr/ps5upl
 | `<drive>/exfat` | Game images (`.exfat`, `.ffpkg`) for image mounting. |
 | `/user/data/ps5upload/pkg_library` | `.pkg` files kept for ps5upload's installer. |
 
-Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. A plain rename *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; the Hub's **Move to…** copies and then deletes instead.
+Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. A plain rename *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; the app's **Move to…** copies and then deletes instead.
 
 ### Converting games (packages, game images, folders)
 
@@ -132,6 +134,8 @@ Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show
 On FW 13.60 a PS5 fake package installs but won't play, so for PS5 games make a **game image** (the app marks it as recommended). The converter is `ps5cable-convert` (in `converter/`), built on ps5upload's own writers: its `.exfat` writer and FPKG builder, and quer3q's PS5 Dump Forge `.ffpkg`/`.ffpfs`/`.ffpfsc` writers. Every output is written as `.partial`, read back and hash-checked, and only then renamed. Not ported: ps5upload's ZIP/7z/RAR sources and reading a game straight off the console; unpack archives or copy the game to the PC first.
 
 ## Using the command line
+
+On Linux and macOS the command line is `./ps5-cable <command>`; on Windows run it from the source with Python as `python pc/ps5cable.py <command>` (the examples use that form).
 
 1. Load the payload on the PS5 and plug in the cable (see Setup). `python pc/ps5cable.py status` should say **PS5 CONNECTED over USB**.
 
@@ -161,7 +165,7 @@ On FW 13.60 a PS5 fake package installs but won't play, so for PS5 games make a 
    python pc/ps5cable.py shutdown   # stop the payload
    ```
 
-Every command waits up to 10 seconds for the PS5 on the cable (`--wait` changes that). Only one program can use the cable at a time, so close the Hub before using the command line.
+Every command waits up to 10 seconds for the PS5 on the cable (`--wait` changes that). Only one program can use the cable at a time, so close the app before using the command line.
 
 Useful places on the PS5: `/data` is internal storage that your File Manager can see, `/mnt/usb0` is the first USB drive, and `/mnt/ext0` is M.2 or extended storage.
 
@@ -192,18 +196,17 @@ converter/target/release/ps5cable-convert image "D:\Games\PPSA01234" --format ff
 converter/target/release/ps5cable-convert help                # every command and option
 ```
 
-`make -C payload host` builds the same server for your PC, with a stand-in for the USB cable (`-C host:port`, a TCP connection that carries the same bulk transfers). The end-to-end tests and the Hub tests run every request through the real USB link code on both sides over that stand-in:
+`make -C payload host` builds the same server for your PC, with a stand-in for the USB cable (`-C host:port`, a TCP connection that carries the same bulk transfers). The end-to-end tests and the app tests run every request through the real USB link code on both sides over that stand-in:
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-To build the Windows executables (CI does the same on `windows-latest`), run this on Windows with `ps5cable.elf` in `payload/`:
+To build `PS5 Cable.exe` (CI does the same on `windows-latest`), run this on Windows with `ps5cable.elf` in `payload/`:
 
 ```sh
 pip install pyinstaller -r pc/requirements.txt
-pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --collect-all libusb_package --hidden-import usb.backend.libusb1 --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
-pyinstaller --onefile --console --name ps5cable --paths pc --collect-all libusb_package --hidden-import usb.backend.libusb1 pc/ps5cable.py
+pyinstaller --onefile --noconsole --name "PS5 Cable" --paths pc --collect-all libusb_package --hidden-import usb.backend.libusb1 --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 ```
 
 Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publish them as a GitHub release, with `.github/release-notes.md` as the description.
@@ -221,7 +224,7 @@ Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publ
 
 The payload serves a small file protocol: requests and responses with a fixed 24-byte header, followed by raw file bytes for uploads and downloads ([`payload/proto.h`](payload/proto.h)). It listens only on the console's loopback address, so nothing on the PS5's network can reach it.
 
-The USB link carries that protocol between the two ends of the bridge cable ([`payload/usblink.h`](payload/usblink.h)). On the PS5 the payload opens the bridge through the system's `libSceUsbd` library. On the PC, `pc/usblink.py` opens it with pyusb/libusb and serves a local port that the Hub and command line connect to. Each connection becomes a channel on the cable, so several transfers run in parallel over one cable. Every USB transfer is one frame: a 12-byte header (`PU`, type, channel, length) and up to 256 KiB of data.
+The USB link carries that protocol between the two ends of the bridge cable ([`payload/usblink.h`](payload/usblink.h)). On the PS5 the payload opens the bridge through the system's `libSceUsbd` library. On the PC, `pc/usblink.py` opens it with pyusb/libusb and serves a local port that the app and command line connect to. Each connection becomes a channel on the cable, so several transfers run in parallel over one cable. Every USB transfer is one frame: a 12-byte header (`PU`, type, channel, length) and up to 256 KiB of data.
 
 ## Credits
 

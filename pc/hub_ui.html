@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ps5cable Hub</title>
+<title>PS5 Cable</title>
 <style>
   :root {
     --bg: #090c13;
@@ -342,7 +342,7 @@
 <header>
   <div class="brand">
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0l-3-3m3 3l-3 3"/></svg></div>
-    <div>ps5cable Hub <small>PC ⇄ PS5</small></div>
+    <div>PS5 Cable <small>PC ⇄ PS5</small></div>
   </div>
   <div class="link" id="link" title="USB link to the PS5">
     <span class="lamp"></span>
@@ -359,7 +359,7 @@
     <div class="bar"><i id="ps5-used"></i></div>
     <div id="ps5-free"></div>
   </div>
-  <button class="ghost icon" id="btn-quit" title="Quit ps5cable Hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 6.3a8 8 0 1011.4 0"/></svg></button>
+  <button class="ghost icon" id="btn-quit" title="Quit PS5 Cable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 6.3a8 8 0 1011.4 0"/></svg></button>
 </header>
 
 <main>
@@ -948,7 +948,7 @@ function disconnectedCard() {
       step(plugged, !plugged, "USB bridge (data link) cable plugged into this PC, with a USB-C or USB-A end"),
       step(opened, ["no_access", "no_driver"].includes(st.state),
         app.os === "nt" ? "USB driver installed on the cable (once)" : "Cable can be opened by this app"),
-      step(false, opened, "Other end in a PS5 USB port, with the ps5cable payload running (load ",
+      step(false, opened, "Other end in a PS5 USB port, with the PS5 Cable payload running (load ",
         elf, " with your jailbreak)")),
     el("div", { style: "display:flex; gap:8px" },
       el("button", { class: st.state === "no_driver" ? "" : "primary", title: "Look for the cable again and list every USB device on this PC",
@@ -1060,7 +1060,7 @@ function linkSubtitle(st) {
       const usb = st.link && st.link.usb_label ? " · " + st.link.usb_label.replace(/ \(.*/, "") : "";
       return "Connected over USB" + usb;
     }
-    case "waiting": return "Waiting for the ps5cable payload on the PS5";
+    case "waiting": return "Waiting for the PS5 Cable payload on the PS5";
     case "no_driver": return "Click Install driver (once)";
     case "no_access": return app.os === "nt" ? "Another program may be using the cable" : "No permission to open the cable";
     case "no_backend": return "Install pyusb and libusb";
@@ -1079,7 +1079,7 @@ function applyStatus(st) {
   $("link-title").textContent = title;
   $("link-sub").textContent = linkSubtitle(st);
   link.title = st.detail || st.error || linkSubtitle(st);
-  document.title = (app.connected ? "PS5 Connected" : title) + " · ps5cable Hub";
+  document.title = (app.connected ? "PS5 Connected" : title) + " · PS5 Cable";
   remote.linkEl.textContent = app.connected ? "Connected" : (st.state === "waiting" ? "Cable found" : "Offline");
   remote.linkEl.className = "linkchip" + (app.connected ? " ok" : "");
   const m = $("ps5-meter");
@@ -1496,7 +1496,7 @@ function cvRenderQueue() {
     el("div", { class: "row-flex" },
       el("button", { class: "primary", onclick: cvStart, disabled: !cv.source.trim() }, running ? `Add to queue: ${startLabel}` : startLabel),
       el("button", { class: "ghost", onclick: async () => { app.cvJobs = (await api("POST", "/api/convert/clear", {})).jobs; cvRenderQueue(); } }, "Clear finished")),
-    app.cvConverter === "" ? el("div", { class: "err-text" }, "The converter (ps5cable-convert) is missing next to the app, so nothing can be converted.") : null,
+    app.cvConverter === "" ? el("div", { class: "err-text" }, "The converter is missing next to the app, so nothing can be converted.") : null,
     el("div", { class: "hint" }, "Conversions run one at a time on this PC; the PS5 doesn't need to be connected until you send the result."));
   const list = jobs.map((j) => {
     const name = (j.source || "").split(/[\\/]/).filter(Boolean).pop();
@@ -1656,7 +1656,7 @@ $("btn-collapse").addEventListener("click", () => $("transfers").classList.toggl
 $("btn-quit").addEventListener("click", async () => {
   if (app.jobs.some((j) => j.state === "running") && !(await modal({ title: "Quit while transfers are running?", okText: "Quit", danger: true }))) return;
   await api("POST", "/api/quit", {}).catch(() => {});
-  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b95a7">ps5cable Hub closed. You can close this window.</div>';
+  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b95a7">PS5 Cable closed. You can close this window.</div>';
 });
 $("opt-resume").addEventListener("change", (e) => api("POST", "/api/settings", { resume: e.target.checked }));
 $("opt-jobs").addEventListener("change", (e) => api("POST", "/api/settings", { jobs: Number(e.target.value) || 4 }));

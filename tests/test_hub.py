@@ -1,4 +1,4 @@
-"""Tests for the ps5cable Hub HTTP API, run against the desktop payload build
+"""Tests for the PS5 Cable app's HTTP API, run against the desktop payload build
 on a fake USB cable."""
 
 import json
@@ -88,7 +88,7 @@ class HubTest(unittest.TestCase):
     def test_serves_ui_with_token_injected(self):
         with urllib.request.urlopen(f"{self.base}/?t={self.token}", timeout=5) as r:
             html = r.read().decode()
-        self.assertIn("ps5cable Hub", html)
+        self.assertIn("<title>PS5 Cable</title>", html)
         self.assertIn(self.token, html)
         self.assertNotIn("__HUB_TOKEN__", html)
 
@@ -96,7 +96,7 @@ class HubTest(unittest.TestCase):
         st = self.api("GET", "/api/state")
         self.assertTrue(st["status"]["connected"], st["status"])
         self.assertEqual(st["status"]["state"], "connected")
-        self.assertIn("ps5cable", st["status"]["banner"])
+        self.assertIn("PS5 Cable", st["status"]["banner"])
         if os.path.isdir("/data"):  # the desktop payload reports the host's /data
             self.assertGreater(st["status"]["total"], 0)
         self.assertNotIn("host", st["settings"])

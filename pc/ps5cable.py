@@ -758,8 +758,9 @@ def cmd_get(args):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="ps5cable",
-        description="Transfer files between this PC and a PS5 over a USB bridge cable (USB-C or USB-A ends).")
+        prog=os.environ.get("PS5CABLE_PROG", "ps5cable"),
+        description="PS5 Cable command line: transfer files between this PC and a PS5 "
+                    "over a USB bridge cable (USB-C or USB-A ends).")
     p.add_argument("--wait", type=float, default=10,
                    help="seconds to wait for the PS5 on the USB cable (default 10)")
     sub = p.add_subparsers(dest="cmd", required=True)

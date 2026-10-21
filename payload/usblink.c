@@ -269,7 +269,7 @@ ulink_session(ulink_t *l, uint16_t port, const char *banner) {
       memcpy(hello + 8, banner, blen);
       send_small(s, UL_HELLO, 0, hello, (uint32_t)(8 + blen));
       if(!greeted) {
-        plat_notify("ps5cable: PC connected over USB (%s)", l->name);
+        plat_notify("PS5 Cable: PC connected over USB (%s)", l->name);
         greeted = 1;
       }
       break;

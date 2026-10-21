@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ps5cable Hub - a two-pane PC <-> PS5 file manager.
+"""PS5 Cable - a two-pane PC <-> PS5 file manager.
 
 Runs a small web server on 127.0.0.1 and opens it in an app window (Edge or
 Chrome in --app mode when available, otherwise the default browser). Pick
@@ -33,7 +33,7 @@ import ps5cable  # noqa: E402
 import usblink  # noqa: E402
 import windriver  # noqa: E402
 
-APP_NAME = "ps5cable Hub"
+APP_NAME = "PS5 Cable"
 SETTINGS_PATH = Path.home() / ".ps5cable-hub.json"
 # Without a heartbeat for this long (and no transfer running) the hub exits,
 # so closing the window does not leave a hidden server behind. Background tabs
@@ -56,6 +56,7 @@ def find_payload():
     for p in (resource_dir() / "ps5cable.elf",
               Path(sys.executable).resolve().parent / "ps5cable.elf",
               Path(__file__).resolve().parent / "ps5cable.elf",
+              Path(__file__).resolve().parent.parent / "ps5cable.elf",
               Path(__file__).resolve().parent.parent / "payload" / "ps5cable.elf"):
         if p.is_file():
             return p
@@ -536,7 +537,7 @@ class ApiError(Exception):
 
 def make_handler(hub, token, ui_html, allowed_hosts):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ps5cable-hub"
+        server_version = "ps5cable"
 
         def log_message(self, fmt, *args):
             pass
@@ -578,7 +579,7 @@ def make_handler(hub, token, ui_html, allowed_hosts):
                     return self._send(HTTPStatus.FORBIDDEN, "forbidden", "text/plain")
                 if parse_qs(url.query).get("t", [""])[0] != token:
                     return self._send(HTTPStatus.FORBIDDEN,
-                                      "Open the link printed by ps5cable Hub.", "text/plain")
+                                      "Open the link printed by PS5 Cable.", "text/plain")
                 return self._send(HTTPStatus.OK, ui_html.replace("__HUB_TOKEN__", token),
                                   "text/html; charset=utf-8")
             if url.path == "/favicon.ico":

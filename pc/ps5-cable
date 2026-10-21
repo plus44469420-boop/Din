@@ -1,0 +1,31 @@
+#!/bin/sh
+# PS5 Cable for Linux and macOS.
+#   ./ps5-cable                opens the app
+#   ./ps5-cable status         the command line (./ps5-cable --help lists every command)
+set -e
+here="$(cd "$(dirname "$0")" && pwd)"
+app="$here/app"
+[ -f "$app/hub.py" ] || app="$here"
+
+py="$(command -v python3 || true)"
+if [ -z "$py" ]; then
+  echo "PS5 Cable needs Python 3.8 or newer: install python3 from your package manager or python.org." >&2
+  exit 1
+fi
+if ! "$py" -c "import usb, libusb_package" 2>/dev/null; then
+  venv="$app/.venv"
+  if [ ! -x "$venv/bin/python" ]; then
+    echo "First run: installing USB support (pyusb and libusb) into $venv" >&2
+    if ! { "$py" -m venv "$venv" && "$venv/bin/python" -m pip install -q -r "$app/requirements.txt"; }; then
+      rm -rf "$venv"
+      echo "Could not install USB support. Run: $py -m pip install -r \"$app/requirements.txt\"" >&2
+      exit 1
+    fi
+  fi
+  py="$venv/bin/python"
+fi
+
+if [ $# -eq 0 ]; then
+  exec "$py" "$app/hub.py"
+fi
+PS5CABLE_PROG=ps5-cable exec "$py" "$app/ps5cable.py" "$@"
