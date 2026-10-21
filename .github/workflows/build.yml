@@ -140,19 +140,19 @@ jobs:
           for i in $(seq 1 30); do grep -q "running at" hub.log && break; sleep 1; done
           url=$(grep -o 'http[^ ]*' hub.log)
           page=$(curl -sf "$url")
-          echo "$page" | grep -q "ps5cable Hub"
+          grep -q "ps5cable Hub" <<<"$page"
           state=$(curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state)
-          echo "$state" | grep -q ps5cable.elf
+          grep -q ps5cable.elf <<<"$state"
           # No cable on the runner: libusb loaded and found nothing, rather than "USB support missing".
           for i in $(seq 1 10); do
             state=$(curl -sf -H "X-Hub-Token: ${url##*t=}" -X POST -d '{}' http://127.0.0.1:8799/api/refresh)
-            echo "$state" | grep -q '"state": "no_cable"' && break
+            grep -q '"state": "no_cable"' <<<"$state" && break
             sleep 1
           done
           echo "$state"
-          echo "$state" | grep -q '"state": "no_cable"'
+          grep -q '"state": "no_cable"' <<<"$state"
           jobs=$(curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/convert/jobs)
-          echo "$jobs" | grep -q ps5cable-convert.exe
+          grep -q ps5cable-convert.exe <<<"$jobs"
           taskkill //F //IM ps5cable-hub.exe || true
 
       - name: Package
