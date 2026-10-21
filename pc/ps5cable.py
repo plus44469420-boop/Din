@@ -33,7 +33,7 @@ PROTO_VER = 1
 
 CMD_PING, CMD_LIST, CMD_STAT, CMD_MKDIR, CMD_DELETE = 1, 2, 3, 4, 5
 CMD_RENAME, CMD_PUT, CMD_GET, CMD_DF, CMD_SHUTDOWN = 6, 7, 8, 9, 10
-CMD_SINK, CMD_SOURCE = 11, 12
+CMD_SINK, CMD_SOURCE, CMD_COPY, CMD_DU = 11, 12, 13, 14
 
 F_RECURSIVE = 1 << 0
 F_MKDIRS = 1 << 1
@@ -46,6 +46,9 @@ ENTRY = struct.Struct("<BQqH")
 
 CHUNK = 4 * 1024 * 1024
 SOCK_BUF = 4 * 1024 * 1024
+# Console-side copies run in chunks this big, each well inside the socket
+# timeout even on a slow USB drive.
+COPY_CHUNK = 128 * 1024 * 1024
 
 
 class RemoteError(Exception):
@@ -135,6 +138,24 @@ class Connection:
     def df(self, path):
         _, _, free, total = self.call(CMD_DF, path)
         return free, total
+
+    def du(self, path):
+        """Returns (bytes, files, folders) under `path`, counted on the PS5."""
+        _, folders, size, files = self.call(CMD_DU, path)
+        return size, files, folders
+
+    def copy_file(self, src, dst, offset=0, progress=None, chunk=None):
+        """Copies a file on the PS5 without sending it over the cable."""
+        raw = src.encode() + b"\0" + dst.encode()
+        while True:
+            _, _, n, size = self.call(CMD_COPY, raw, 0, offset, chunk or COPY_CHUNK)
+            offset += n
+            if n and progress:
+                progress(n)
+            if offset >= size:
+                return
+            if not n:
+                raise RemoteError(f"copy of {src} stopped making progress")
 
     def shutdown(self):
         self.call(CMD_SHUTDOWN)
@@ -541,6 +562,30 @@ def cmd_mv(args):
     return 0
 
 
+def cmd_cp(args):
+    host = resolve_host(args)
+    with connect(args) as c:
+        try:
+            plan, _, _ = plan_remote_copy(c, args.src, args.dest)
+        except (FileNotFoundError, FileExistsError, ValueError) as e:
+            sys.exit(str(e))
+    progress = Progress(sum(w[2] for w in plan), len(plan))
+    failures = run_remote_copy(host, args.port, plan, on_bytes=progress.add,
+                               on_file=lambda item, err: progress.file_finished())
+    progress.finish()
+    for item, err in failures:
+        print(f"FAILED {item[0]}: {err}", file=sys.stderr)
+    return 1 if failures else 0
+
+
+def cmd_du(args):
+    with connect(args) as c:
+        for p in args.paths:
+            size, files, folders = c.du(p)
+            print(f"{human(size):>12}  {files} files, {folders} folders  {p}")
+    return 0
+
+
 def cmd_df(args):
     with connect(args) as c:
         free, total = c.df(args.path)
@@ -638,6 +683,117 @@ def plan_download(conn, sources, dest, resume=False):
                 offset = have
         plan.append((rp, str(lp), size, offset))
     return plan, len(work) - len(plan)
+
+
+def _free_name(conn, folder, name, is_dir):
+    """`name`, or "name (copy)", "name (copy 2)"... whichever is unused."""
+    stem, ext = (name, "") if is_dir else posixpath.splitext(name)
+    for i in range(1, 1000):
+        tag = " (copy)" if i == 1 else f" (copy {i})"
+        candidate = remote_join(folder, f"{stem}{tag}{ext}")
+        if conn.stat(candidate) is None:
+            return candidate
+    raise FileExistsError(f"Too many copies of {name} in {folder}")
+
+
+def plan_remote_copy(conn, sources, dest, move=False):
+    """Plans copying or moving PS5 files/folders into the PS5 folder `dest`.
+
+    A move within one drive is a rename and happens right here. Everything else
+    becomes (src, dst, size, 0) copy items, with the folder skeleton created up
+    front. Copying into the source's own folder picks a "(copy)" name. Returns
+    (plan, renamed_count, to_delete): a move across drives must delete the
+    sources in to_delete once their copies have succeeded, because renaming
+    across drives crashes the PS5."""
+    dest = posixpath.normpath(dest)
+    st = conn.stat(dest)
+    if st is None or st[0] != KIND_DIR:
+        raise FileNotFoundError(f"No such folder on PS5: {dest}")
+
+    targets = []
+    for src in sources:
+        src = posixpath.normpath(src)
+        st = conn.stat(src)
+        if st is None:
+            raise FileNotFoundError(f"No such file or directory on PS5: {src}")
+        if st[0] == KIND_OTHER:
+            raise ValueError(f"{src} is not a file or folder")
+        if st[0] == KIND_DIR and (dest == src or dest.startswith(src.rstrip("/") + "/")):
+            raise ValueError(f"Can't {'move' if move else 'copy'} {src} into itself")
+        in_place = posixpath.dirname(src) == dest
+        if in_place and move:
+            continue
+        if in_place:
+            target = _free_name(conn, dest, posixpath.basename(src), st[0] == KIND_DIR)
+        else:
+            target = remote_join(dest, posixpath.basename(src))
+            if conn.stat(target) is not None:
+                raise FileExistsError(f"{target} already exists on the PS5")
+        targets.append((src, target, st))
+
+    plan, dirs, renamed, to_delete = [], [], 0, []
+    for src, target, st in targets:
+        if move:
+            try:
+                conn.rename(src, target)
+                renamed += 1
+                continue
+            except RemoteError as e:
+                if "different drives" not in str(e):
+                    raise
+            to_delete.append(src)
+        if st[0] == KIND_FILE:
+            plan.append((src, target, st[1], 0))
+            continue
+        stack = [(src, target)]
+        while stack:
+            sdir, ddir = stack.pop()
+            dirs.append(ddir)
+            for ename, kind, size, _ in conn.listdir(sdir):
+                if kind == KIND_DIR:
+                    stack.append((remote_join(sdir, ename), remote_join(ddir, ename)))
+                elif kind == KIND_FILE:
+                    plan.append((remote_join(sdir, ename), remote_join(ddir, ename), size, 0))
+    for d in dirs:
+        conn.mkdir(d)
+    return plan, renamed, to_delete
+
+
+def run_remote_copy(host, port, plan, on_bytes=None, on_file=None, cancel=None):
+    """Runs a plan from plan_remote_copy on the console, one file at a time
+    (both ends are the PS5's own drives, so parallel copies only compete).
+    A cancelled copy removes its half-written file. Returns [(item, error)]."""
+    failures = []
+
+    def progress(n):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled("cancelled")
+        if on_bytes:
+            on_bytes(n)
+
+    with Connection(host, port) as conn:
+        for item in plan:
+            src, dst, _, off = item
+            err = None
+            try:
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("cancelled")
+                conn.copy_file(src, dst, off, progress)
+            except Cancelled as e:
+                err = e
+                try:
+                    conn.delete(dst)
+                except RemoteError:
+                    pass
+            except RemoteError as e:
+                err = e
+                failures.append((item, e))
+            finally:
+                if on_file:
+                    on_file(item, err)
+            if isinstance(err, Cancelled):
+                break
+    return failures
 
 
 def run_transfers(host, port, plan, upload, jobs=4, on_bytes=None,
@@ -795,6 +951,16 @@ def build_parser():
     s.add_argument("src")
     s.add_argument("dst")
     s.set_defaults(func=cmd_mv)
+
+    s = sub.add_parser("cp", help="copy files/folders into a folder on the PS5 "
+                                  "(the data stays on the console)")
+    s.add_argument("src", nargs="+")
+    s.add_argument("dest", help="destination folder on the PS5")
+    s.set_defaults(func=cmd_cp)
+
+    s = sub.add_parser("du", help="total size of PS5 files/folders")
+    s.add_argument("paths", nargs="+")
+    s.set_defaults(func=cmd_du)
 
     s = sub.add_parser("df", help="free space")
     s.add_argument("path", nargs="?", default="/data")

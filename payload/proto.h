@@ -35,6 +35,9 @@ enum {
   CMD_SHUTDOWN = 10, /* stop the payload */
   CMD_SINK     = 11, /* a=bytes the client sends; discarded -> b=elapsed us */
   CMD_SOURCE   = 12, /* a=bytes -> a=bytes of zeros that follow */
+  CMD_COPY     = 13, /* path = "src\0dst", a=offset, b=max bytes (0 = all)
+                        -> a=bytes copied, b=source size */
+  CMD_DU       = 14, /* -> a=total bytes, b=files, mode=folders */
 };
 
 enum {
