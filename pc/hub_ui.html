@@ -261,6 +261,12 @@
   .steps li { display: flex; gap: 10px; align-items: center; color: var(--muted); }
   .steps .tick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #334155; display: grid; place-items: center; font-size: 12px; flex: none; }
   .steps li.done { color: var(--text); }
+  table.ctypes { border-collapse: collapse; font-size: 12.5px; width: 100%; text-align: left; }
+  table.ctypes th, table.ctypes td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+  table.ctypes th { color: var(--muted); font-weight: 600; border-top: none; }
+  table.ctypes td:first-child { white-space: nowrap; font-weight: 600; }
+  .guide { text-align: left; display: grid; gap: 8px; }
+  .guide p { margin: 0; color: var(--muted); font-size: 12.5px; }
   .steps li.done .tick { background: var(--ok); border-color: var(--ok); color: #052e14; font-weight: 800; }
   .steps li.active { color: #fcd34d; }
   .steps li.active .tick { border-color: var(--warn); animation: blink 1s ease-in-out infinite; }
@@ -327,13 +333,13 @@
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0l-3-3m3 3l-3 3"/></svg></div>
     <div>ps5cable Hub <small>PC ⇄ PS5</small></div>
   </div>
-  <div class="link" id="link" title="USB-C link to the PS5">
+  <div class="link" id="link" title="USB link to the PS5">
     <span class="lamp"></span>
-    <span class="txt"><b id="link-title">PS5 not connected</b><small id="link-sub">Looking for the USB-C cable…</small></span>
+    <span class="txt"><b id="link-title">PS5 not connected</b><small id="link-sub">Looking for the USB cable…</small></span>
   </div>
-  <button class="cable" id="cable" title="USB-C cable details and speed test" hidden>
+  <button class="cable" id="cable" title="USB cable details and speed test" hidden>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4m8-4v4M6 7h12v3a6 6 0 01-12 0zM12 16v2a3 3 0 003 3h3"/></svg>
-    <span class="txt"><b id="cable-title">USB-C bridge cable</b><small id="cable-sub"></small></span>
+    <span class="txt"><b id="cable-title">USB bridge cable</b><small id="cable-sub"></small></span>
   </button>
   <button class="ghost" id="btn-convert" title="Convert games: package, game image (.ffpkg/.exfat/.ffpfs/.ffpfsc) or folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"/><rect x="15" y="3" width="6" height="8" rx="1"/><rect x="3" y="13" width="6" height="8" rx="1"/></svg>Convert</button>
   <div class="spacer"></div>
@@ -926,16 +932,29 @@ function disconnectedCard() {
   const elf = app.payloadPath ? el("code", {}, app.payloadPath) : "ps5cable.elf";
   return el("div", { class: "empty" }, el("div", { class: "card" },
     el("div", { html: ICONS.plug.replace("<svg", '<svg class="big"') }),
-    el("h3", {}, opened ? "USB-C cable found" : "PS5 not connected"),
+    el("h3", {}, opened ? "USB cable found" : "PS5 not connected"),
     el("ol", { class: "steps" },
-      step(plugged, !plugged, "USB-C bridge (data link) cable plugged into this PC"),
+      step(plugged, !plugged, "USB bridge (data link) cable plugged into this PC, with a USB-C or USB-A end"),
       step(opened, st.state === "no_access",
         app.os === "nt" ? "WinUSB driver installed on the cable (Zadig, once)" : "Cable can be opened by this app"),
       step(false, opened, "Other end in a PS5 USB port, with the ps5cable payload running (load ",
         elf, " with your jailbreak)")),
     el("div", { style: "display:flex; gap:8px" },
       el("button", { class: "primary", onclick: checkAgain }, "Check again")),
-    el("small", { style: "color:#6b7689; max-width: 420px" }, st.detail || linkSubtitle(st))));
+    el("small", { style: "color:#6b7689; max-width: 420px" }, st.detail || linkSubtitle(st)),
+    el("details", {}, el("summary", {}, "USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A: which ports?"),
+      cableGuide())));
+}
+
+function cableGuide() {
+  const g = app.usbGuide;
+  if (!g) return "";
+  return el("div", { class: "guide" },
+    el("table", { class: "ctypes" },
+      el("tr", {}, el("th", {}, "Cable"), el("th", {}, "PC end"), el("th", {}, "PS5 end")),
+      g.cable_types.map((t) => el("tr", {}, el("td", {}, t.ends), el("td", {}, t.pc), el("td", {}, t.ps5)))),
+    el("p", {}, "All three work the same: the connector doesn't change the speed, the ports' USB generation does. " +
+      g.pc_port_tip + " " + g.ps5_port_tip));
 }
 
 const local = new Pane("local");
@@ -961,7 +980,7 @@ function updateRail() {
 
 const LINK_TEXT = {
   connected: ["PS5 Connected", "ok"],
-  waiting: ["USB-C cable found", "warn"],
+  waiting: ["USB cable found", "warn"],
   no_access: ["Cable needs a driver", "warn"],
   no_backend: ["USB support missing", "warn"],
   no_cable: ["PS5 not connected", ""],
@@ -972,13 +991,13 @@ function linkSubtitle(st) {
   switch (st.state) {
     case "connected": {
       const usb = st.link && st.link.usb_label ? " · " + st.link.usb_label.replace(/ \(.*/, "") : "";
-      return "Connected over USB-C" + usb;
+      return "Connected over USB" + usb;
     }
     case "waiting": return "Waiting for the ps5cable payload on the PS5";
     case "no_access": return app.os === "nt" ? "Install the WinUSB driver with Zadig" : "No permission to open the cable";
     case "no_backend": return "Install pyusb and libusb";
-    case "starting": return "Looking for the USB-C cable…";
-    default: return "Plug in the USB-C bridge cable";
+    case "starting": return "Looking for the USB cable…";
+    default: return "Plug in the USB bridge cable (USB-C or USB-A)";
   }
 }
 
@@ -1019,7 +1038,7 @@ function applyStatus(st) {
   app.statusTimer = setTimeout(pollStatus, app.connected ? 5000 : 2000);
 }
 
-// ---------------------------------------------------------------- USB-C cable
+// ---------------------------------------------------------------- USB cable
 
 const fmtRate = (v) => v == null ? "—" : `${v >= 10 ? Math.round(v) : v.toFixed(1)} MB/s`;
 
@@ -1028,14 +1047,14 @@ function renderCable(link) {
   if (!link) { b.hidden = true; return; }
   b.hidden = false;
   b.className = "cable" + (["ok", "warn", "bad"].includes(link.level) ? " " + link.level : "");
-  $("cable-title").textContent = link.summary || "USB-C bridge cable";
+  $("cable-title").textContent = link.summary || "USB bridge cable";
   const st = app.status && app.status.speedtest;
   let sub;
   if (st) sub = `Measured ${fmtRate(Math.min(st.up_mbs, st.down_mbs))}` + (link.expected_mbs ? ` · max ~${fmtRate(link.expected_mbs)}` : "");
   else if (link.expected_mbs) sub = `Max ~${fmtRate(link.expected_mbs)} · limited by ${link.bottleneck.replace(/ \(.*/, "")}`;
   else sub = "Click for a speed test";
   $("cable-sub").textContent = sub;
-  b.title = (link.notes || []).join("\n") || "USB-C cable details and speed test";
+  b.title = (link.notes || []).join("\n") || "USB cable details and speed test";
   if (app.cablePanel) app.cablePanel.render();
 }
 
@@ -1046,7 +1065,7 @@ function openCablePanel() {
   const close = () => { bg.remove(); app.cablePanel = null; };
   const bg = el("div", { class: "modal-bg", onclick: (e) => { if (e.target === bg) close(); } },
     el("div", { class: "modal wide" },
-      el("h3", {}, "USB-C cable"), body,
+      el("h3", {}, "USB cable"), body,
       el("div", { class: "row" }, el("button", { onclick: close }, "Close"), runBtn)));
   let running = false;
 
@@ -1059,7 +1078,8 @@ function openCablePanel() {
       ["Connection", link.connection],
       ["Bridge rated", link.chip_mbps ? (link.chip_mbps > 480 ? "USB 3 (5 Gbps)" : "USB 2.0 (480 Mbps)") : null],
       ["This PC's port", link.usb_label || "Not reported (run a speed test)"],
-      ["PS5 port", "Use a SuperSpeed port: rear USB-A or front USB-C"],
+      ["Cable ends", "USB-C or USB-A, any combination (not detectable, and it doesn't change the speed)"],
+      ["PS5 port", "Rear USB-A (USB-A end) or SuperSpeed front USB-C (USB-C end)"],
       ["Best case", link.expected_mbs ? `${fmtRate(link.expected_mbs)}  ·  ~${(link.expected_mbs * 60 / 1024).toFixed(1)} GB per minute` : null],
     ].filter(([, v]) => v);
     const dl = el("dl", { class: "facts" }, facts.flatMap(([k, v]) =>
@@ -1081,7 +1101,9 @@ function openCablePanel() {
         el("span", {}, "Download ", el("b", {}, fmtRate(st.down_mbs))),
         el("span", { style: "color:#8b95a7; align-self:end" }, `at ${new Date(st.at * 1000).toLocaleTimeString()}`)),
       el("ul", { class: "notes " + st.verdict }, st.notes.map((n) => el("li", {}, n)))) : null;
-    body.replaceChildren(dl, bars, notes || "", result || "");
+    const guide = el("details", {}, el("summary", {}, "Which ports for USB-C ⇄ USB-C, USB-A ⇄ USB-C and USB-A ⇄ USB-A cables"),
+      cableGuide());
+    body.replaceChildren(dl, bars, notes || "", result || "", guide);
     runBtn.disabled = running || !app.connected;
     runBtn.textContent = running ? "Testing… (about 6 s)" : st ? "Run again" : "Run speed test";
     runBtn.title = app.connected ? "Sends and receives test data in memory; nothing is written to the PS5"
@@ -1549,6 +1571,7 @@ async function boot() {
   app.settings = st.settings;
   app.os = st.os;
   app.payloadPath = st.payload;
+  app.usbGuide = st.usb_guide;
   $("opt-resume").checked = !!st.settings.resume;
   $("opt-jobs").value = st.settings.jobs;
   local.places = st.local_places;

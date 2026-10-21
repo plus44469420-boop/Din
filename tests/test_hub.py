@@ -103,9 +103,17 @@ class HubTest(unittest.TestCase):
 
     def test_state_reports_usb_cable(self):
         link = self.api("GET", "/api/state")["status"]["link"]
-        self.assertEqual(link["connection"], "USB-C bridge cable")
+        self.assertEqual(link["connection"], "USB bridge cable")
+        self.assertEqual([t["ends"] for t in link["cable_types"]],
+                         ["USB-C ⇄ USB-C", "USB-A ⇄ USB-C", "USB-A ⇄ USB-A"])
         self.assertEqual(link["chip"], "Fake cable (test)")
         self.assertEqual(self.api("GET", "/api/link")["link"]["summary"], link["summary"])
+
+    def test_state_has_cable_guide_before_any_cable(self):
+        guide = self.api("GET", "/api/state")["usb_guide"]
+        self.assertIn("USB-A ⇄ USB-C", [t["ends"] for t in guide["cable_types"]])
+        self.assertIn("blue", guide["pc_port_tip"])
+        self.assertIn("rear USB-A", guide["ps5_port_tip"])
 
     def test_network_endpoints_are_gone(self):
         for path in ("/api/connect", "/api/discover", "/api/send-payload"):

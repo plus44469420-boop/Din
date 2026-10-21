@@ -908,7 +908,7 @@ main(int argc, char *argv[]) {
 
   usb_start(port, version, cable);
   if(g_notify) {
-    plat_notify("ps5cable ready: connect the USB-C bridge cable to the PC");
+    plat_notify("ps5cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC");
   }
 
   for(;;) {

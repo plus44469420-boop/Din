@@ -70,6 +70,15 @@ class AssessTest(unittest.TestCase):
         self.assertEqual(info["level"], "warn")
         self.assertEqual(info["expected_mbs"], 35.0)
         self.assertTrue(info["bottleneck"].startswith("PC USB port"))
+        # A USB-A end in a black (USB 2) port is the usual cause on a PC.
+        self.assertIn("black or white USB-A ports are USB 2.0", " ".join(info["notes"]))
+
+    def test_every_cable_type_is_covered(self):
+        info = usblink.assess({"chip": "Prolific PL27A1", "chip_mbps": 5000, "usb_mbps": 5000})
+        ends = {t["ends"]: t for t in info["cable_types"]}
+        self.assertEqual(set(ends), {"USB-C ⇄ USB-C", "USB-A ⇄ USB-C", "USB-A ⇄ USB-A"})
+        self.assertIn("rear USB-A", ends["USB-A ⇄ USB-C"]["ps5"])
+        self.assertIn("USB-C", ends["USB-A ⇄ USB-C"]["pc"])
 
     def test_usb2_bridge(self):
         info = usblink.assess({"chip": "Prolific PL25A1", "chip_mbps": 480, "usb_mbps": 5000})

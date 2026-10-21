@@ -1,7 +1,8 @@
 /* ps5cable over a USB bridge cable.
  *
- * A PC and a PS5 are both USB hosts, so a plain USB-C cable between them does
- * nothing. A bridge ("data link" / "transfer") cable has a chip in the middle,
+ * A PC and a PS5 are both USB hosts, so a plain USB cable (C-C, A-C or A-A)
+ * between them does nothing. A bridge ("data link" / "transfer") cable, with
+ * USB-C or USB-A ends in any combination, has a chip in the middle,
  * such as Prolific's PL27A1 (USB 3) or PL25A1 (USB 2), that shows up as a
  * device on both ends and passes bulk transfers from one host to the other.
  *

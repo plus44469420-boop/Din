@@ -1,7 +1,7 @@
-"""USB-C link to the ps5cable payload over a USB bridge cable.
+"""USB link to the ps5cable payload over a USB bridge cable.
 
-A PC and a PS5 are both USB hosts, so a plain USB-C cable between them does
-nothing. A bridge ("data link" / "transfer") cable has a chip in the middle,
+A PC and a PS5 are both USB hosts, so a plain USB cable between them (C to C,
+A to C or A to A) does nothing. A bridge ("data link" / "transfer") cable has a chip in the middle,
 such as Prolific's PL27A1 (USB 3) or PL25A1 (USB 2), that shows up as a USB
 device on both ends and passes bulk transfers from one host to the other.
 
@@ -54,6 +54,20 @@ USB_SPEED_LABEL = {480: "USB 2.0 Hi-Speed (480 Mbps)",
                    5000: "USB 3.2 Gen 1 (5 Gbps)",
                    10000: "USB 3.2 Gen 2 (10 Gbps)",
                    12: "USB 1.1 Full Speed (12 Mbps)", 1.5: "USB 1.0 Low Speed"}
+# Bridge cables come with either connector at either end; the chip, and so
+# the software, is the same. Only the ports' USB generation sets the speed.
+CABLE_TYPES = [
+    {"ends": "USB-C ⇄ USB-C", "pc": "a USB-C port with data",
+     "ps5": "the SuperSpeed front USB-C port"},
+    {"ends": "USB-A ⇄ USB-C", "pc": "the USB-C end in a USB-C port, or the USB-A end in a blue USB 3 port",
+     "ps5": "the USB-A end in a rear USB-A port, or the USB-C end in the SuperSpeed front USB-C port"},
+    {"ends": "USB-A ⇄ USB-A", "pc": "a blue (USB 3) USB-A port",
+     "ps5": "a rear USB-A port"},
+]
+PC_PORT_TIP = ("Use any USB-C port with data, or a USB-A port that is blue (or teal/red, "
+               "or marked SS): black or white USB-A ports are USB 2.0.")
+PS5_PORT_TIP = ("On the PS5 use a rear USB-A port (USB-A end) or the SuperSpeed front USB-C "
+                "port (USB-C end). The original PS5's front USB-A port is USB 2.0 only.")
 # What a bridge chip actually moves at each bus speed, in MB/s.
 USB_PRACTICAL_MBS = {480: 35.0, 5000: 250.0, 10000: 250.0, 12: 1.0, 1.5: 0.1}
 
@@ -286,7 +300,9 @@ def assess(info):
     """Adds expected_mbs, bottleneck, limits, level and notes for the UI."""
     info = dict(info or {})
     chip, chip_mbps, usb = info.get("chip"), info.get("chip_mbps"), info.get("usb_mbps")
-    info["connection"] = "USB-C bridge cable"
+    info["connection"] = "USB bridge cable"
+    info["cable_types"] = CABLE_TYPES
+    info["pc_port_tip"], info["ps5_port_tip"] = PC_PORT_TIP, PS5_PORT_TIP
     if usb:
         info["usb_label"] = USB_SPEED_LABEL.get(usb, f"{usb} Mbps")
     limits = []
@@ -311,19 +327,17 @@ def assess(info):
     elif usb and usb <= 480:
         level = "warn"
         notes.append("This PC sees the cable at USB 2.0 speed, about 35 MB/s. Plug it "
-                     "straight into a USB 3 / USB-C port with data (not a hub or a "
-                     "USB 2 port).")
+                     "straight into a USB 3 port, not through a hub. " + PC_PORT_TIP)
     elif chip_mbps:
         notes.insert(0, f"USB 3 bridge: up to about {human_rate(info['expected_mbs'])}, "
                         f"roughly {info['expected_mbs'] * 60 / 1024:.0f} GB per minute.")
     if chip_mbps:
-        notes.append("The PS5 end must be in a SuperSpeed port too (the rear USB-A ports, "
-                     "or the front USB-C port); the original PS5's front USB-A port is "
-                     "USB 2.0 only. Run a speed test to check both ends.")
+        notes.append("The PS5 end must be in a SuperSpeed port too. " + PS5_PORT_TIP +
+                     " Run a speed test to check both ends.")
     info["level"] = level
     info["notes"] = notes
     parts = [chip, info.get("usb_label", "").split(" (")[0]]
-    info["summary"] = " · ".join(p for p in parts if p) or "USB-C bridge cable"
+    info["summary"] = " · ".join(p for p in parts if p) or "USB bridge cable"
     return info
 
 
@@ -339,8 +353,8 @@ def interpret_speedtest(info, up_mbs, down_mbs):
         verdict = "warn"
         notes.append(f"Measured {human_rate(measured)}, expected about {human_rate(expected)}.")
         if 20 <= measured <= 45:
-            notes.append("That matches USB 2.0. The PS5 end is probably in a USB 2.0 port "
-                         "(the original PS5's front USB-A) or there is a hub in between.")
+            notes.append("That matches USB 2.0: one end is in a USB 2.0 port or behind a hub. "
+                         + PS5_PORT_TIP + " " + PC_PORT_TIP)
         else:
             notes.append("Possible causes: a hub or dock in between, a long passive "
                          "extension, or the PC busy with something else.")
@@ -352,8 +366,8 @@ def interpret_speedtest(info, up_mbs, down_mbs):
 STATE_TEXT = {
     "starting": "Looking for the USB bridge cable...",
     "no_backend": "USB support is missing.",
-    "no_cable": "No USB bridge cable found. Plug a USB-C bridge (data link) cable "
-                "between this PC and the PS5.",
+    "no_cable": "No USB bridge cable found. Plug a USB bridge (data link) cable "
+                "between this PC and the PS5: USB-C or USB-A ends both work.",
     "no_access": "The USB bridge cable cannot be opened.",
     "waiting": "Bridge cable found. Waiting for the ps5cable payload on the PS5; "
                "load ps5cable.elf with the jailbreak.",

@@ -232,6 +232,7 @@ class ServerTest(unittest.TestCase):
         self.assertIn("PS5 CONNECTED over USB", out)
         self.assertIn("Fake cable", out)
         self.assertIn("/data:", out)
+        self.assertIn("USB-A ⇄ USB-C", out)
 
     def test_large_file_crosses_many_frames(self):
         data = random.Random(11).randbytes(3 * usblink.MAX_DATA + 12345)

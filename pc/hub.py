@@ -617,7 +617,9 @@ def _require(args, *keys):
 def api_state(hub, args):
     return {"app": APP_NAME, "settings": hub.settings.snapshot(),
             "status": hub.status(), "payload": str(find_payload() or ""),
-            "local_places": local_places(), "os": os.name}
+            "local_places": local_places(), "os": os.name,
+            "usb_guide": {"cable_types": usblink.CABLE_TYPES, "pc_port_tip": usblink.PC_PORT_TIP,
+                          "ps5_port_tip": usblink.PS5_PORT_TIP}}
 
 
 def api_heartbeat(hub, args):

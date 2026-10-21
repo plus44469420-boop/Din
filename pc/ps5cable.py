@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""ps5cable - move files between a PC and a jailbroken PS5 over a USB-C cable.
+"""ps5cable - move files between a PC and a jailbroken PS5 over a USB cable
+(a USB bridge cable with USB-C or USB-A ends).
 
 Talks to the ps5cable payload (payload/ps5cable.elf) running on the console,
 through a USB bridge cable (see usblink.py). Needs Python 3.8+ and pyusb
@@ -365,6 +366,9 @@ def print_link(info):
               f"(limited by {info['bottleneck']})")
     for note in info["notes"]:
         print(f"  - {note}")
+    print("  Cable types that work (the connector doesn't change the speed):")
+    for t in info.get("cable_types", []):
+        print(f"    {t['ends']}: PC {t['pc']}; PS5 {t['ps5']}")
 
 
 def cmd_speedtest(args):
@@ -755,7 +759,7 @@ def cmd_get(args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="ps5cable",
-        description="Transfer files between this PC and a PS5 over a USB-C bridge cable.")
+        description="Transfer files between this PC and a PS5 over a USB bridge cable (USB-C or USB-A ends).")
     p.add_argument("--wait", type=float, default=10,
                    help="seconds to wait for the PS5 on the USB cable (default 10)")
     sub = p.add_subparsers(dest="cmd", required=True)
