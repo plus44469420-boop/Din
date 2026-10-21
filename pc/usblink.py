@@ -229,8 +229,8 @@ class PyUsbBackend:
             # libusb's "not supported" on Windows: the device isn't on WinUSB.
             if os.name == "nt" and (isinstance(e, NotImplementedError)
                                     or getattr(e, "backend_error_code", None) == -12):
-                raise NoDriver(f"Found a {chip} cable, but it needs the USB driver. "
-                               f"{_access_hint()}")
+                raise NoDriver(f"Found a {chip} cable. It needs the USB driver, once: click "
+                               "Install driver and OK the Windows prompt.")
             raise NoAccess(f"Found a {chip} cable but could not open it ({e}). {_access_hint()}")
 
         def bulk(direction):
