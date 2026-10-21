@@ -382,6 +382,168 @@ handle_rename(int fd, const char *path, size_t pathlen) {
   return send_ok(fd);
 }
 
+/* Copies one regular file on the console, at most `max` bytes per request so
+ * the client can show progress, cancel and resume between chunks. */
+static int
+handle_copy(int fd, const char *path, size_t pathlen, uint64_t offset,
+            uint64_t max, uint8_t *buf) {
+  size_t srclen = strlen(path);
+  uint64_t remaining, copied = 0;
+  struct stat st, dst_st;
+  const char *dst;
+  int in, out;
+
+  if(srclen + 1 >= pathlen) {
+    return send_err(fd, "copy: expected \"src\\0dst\"");
+  }
+  dst = path + srclen + 1;
+  if(dst[0] != '/') {
+    return send_err(fd, "copy: destination must be absolute: \"%s\"", dst);
+  }
+  if((in = open(path, O_RDONLY)) < 0) {
+    return SEND_ERRNO(fd, "open", path);
+  }
+  if(fstat(in, &st)) {
+    int err = errno;
+    close(in);
+    errno = err;
+    return SEND_ERRNO(fd, "stat", path);
+  }
+  if(!S_ISREG(st.st_mode)) {
+    close(in);
+    return send_err(fd, "copy: %s: not a regular file", path);
+  }
+  if(!stat(dst, &dst_st) && dst_st.st_dev == st.st_dev &&
+     dst_st.st_ino == st.st_ino) {
+    close(in);
+    return send_err(fd, "copy: %s: source and destination are the same file",
+                    path);
+  }
+  if(offset > (uint64_t)st.st_size) {
+    close(in);
+    return send_err(fd, "copy: %s: offset past end of file", path);
+  }
+  if(mkdir_parent(dst)) {
+    int err = errno;
+    close(in);
+    errno = err;
+    return SEND_ERRNO(fd, "mkdir", dst);
+  }
+
+  out = offset ? open(dst, O_WRONLY) : open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+  if(out < 0) {
+    int err = errno;
+    close(in);
+    errno = err;
+    return SEND_ERRNO(fd, "open", dst);
+  }
+  if(offset && (fstat(out, &dst_st) || (uint64_t)dst_st.st_size < offset)) {
+    close(in);
+    close(out);
+    return send_err(fd, "copy: %s is shorter than the resume offset", dst);
+  }
+  if((offset && ftruncate(out, (off_t)offset)) ||
+     lseek(in, (off_t)offset, SEEK_SET) < 0 ||
+     lseek(out, (off_t)offset, SEEK_SET) < 0) {
+    int err = errno;
+    close(in);
+    close(out);
+    errno = err;
+    return SEND_ERRNO(fd, "seek", dst);
+  }
+
+  remaining = (uint64_t)st.st_size - offset;
+  if(max && max < remaining) {
+    remaining = max;
+  }
+  while(remaining) {
+    size_t want = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;
+    ssize_t n = read(in, buf, want);
+
+    if(n < 0 && errno == EINTR) {
+      continue;
+    }
+    if(n <= 0) {
+      int err = n ? errno : EIO;
+      close(in);
+      close(out);
+      errno = err;
+      return SEND_ERRNO(fd, "read", path);
+    }
+    if(write_full(out, buf, (size_t)n)) {
+      int err = errno;
+      close(in);
+      close(out);
+      errno = err;
+      return SEND_ERRNO(fd, "write", dst);
+    }
+    remaining -= (uint64_t)n;
+    copied += (uint64_t)n;
+  }
+  close(in);
+  if(close(out)) {
+    return SEND_ERRNO(fd, "close", dst);
+  }
+  return send_res(fd, KIND_FILE, (uint32_t)st.st_mode, copied,
+                  (uint64_t)st.st_size);
+}
+
+typedef struct {
+  uint64_t bytes;
+  uint64_t files;
+  uint32_t dirs;
+} du_t;
+
+/* Does not follow symlinks, and heap-allocates child paths like rm_rf. */
+static int
+du_walk(const char *path, du_t *du) {
+  struct dirent *ent;
+  struct stat st;
+  DIR *dir;
+
+  if(lstat(path, &st)) {
+    return -1;
+  }
+  if(!S_ISDIR(st.st_mode)) {
+    du->bytes += (uint64_t)st.st_size;
+    du->files++;
+    return 0;
+  }
+  du->dirs++;
+  if(!(dir = opendir(path))) {
+    return 0;
+  }
+  while((ent = readdir(dir))) {
+    char *child;
+
+    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) {
+      continue;
+    }
+    if(asprintf(&child, "%s/%s", path, ent->d_name) < 0) {
+      closedir(dir);
+      errno = ENOMEM;
+      return -1;
+    }
+    du_walk(child, du);
+    free(child);
+  }
+  closedir(dir);
+  return 0;
+}
+
+static int
+handle_du(int fd, const char *path) {
+  du_t du = {0};
+
+  if(du_walk(path, &du)) {
+    return SEND_ERRNO(fd, "du", path);
+  }
+  if(du.dirs) {
+    du.dirs--;
+  }
+  return send_res(fd, 0, du.dirs, du.bytes, du.files);
+}
+
 static int
 handle_put(int fd, const char *path, uint8_t flags, uint64_t total,
            uint64_t offset, uint8_t *buf) {
@@ -635,6 +797,8 @@ client_thread(void *arg) {
     case CMD_DF:       rc = handle_df(fd, path); break;
     case CMD_SINK:     rc = handle_sink(fd, req.a, buf); break;
     case CMD_SOURCE:   rc = handle_source(fd, req.a, buf); break;
+    case CMD_COPY:     rc = handle_copy(fd, path, req.pathlen, req.a, req.b, buf); break;
+    case CMD_DU:       rc = handle_du(fd, path); break;
     case CMD_SHUTDOWN:
       send_ok(fd);
       plat_notify("ps5cable stopped");

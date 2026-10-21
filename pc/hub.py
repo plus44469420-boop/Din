@@ -41,6 +41,13 @@ SETTINGS_PATH = Path.home() / ".ps5cable-hub.json"
 # so closing the window does not leave a hidden server behind. Background tabs
 # throttle timers to about once a minute, hence the generous margin.
 IDLE_EXIT_SECONDS = 180
+# Deleting a game folder with tens of thousands of files can take minutes.
+REMOTE_DELETE_TIMEOUT = 1800
+# Console folders the Hub refuses to delete, rename or move: losing them
+# breaks the system software, the jailbreak or a whole drive. Anything below
+# the depth listed stays manageable (e.g. /data/homebrew/PPSA01234).
+SYSTEM_ROOTS = ("system", "system_ex", "system_data", "system_tmp", "preinst",
+                "preinst2", "update", "dev", "usr", "eap_user", "eap_vsh")
 
 
 def resource_dir():
@@ -92,9 +99,10 @@ class Settings:
 
 
 class Job:
-    def __init__(self, upload, sources, dest):
+    def __init__(self, kind, sources, dest):
         self.id = uuid.uuid4().hex[:12]
-        self.upload = upload
+        self.kind = kind  # "upload", "download", or "copy"/"move" within the PS5
+        self.upload = kind == "upload"
         self.sources = list(sources)
         self.dest = dest
         self.state = "planning"
@@ -103,6 +111,7 @@ class Job:
         self.files_total = 0
         self.files_done = 0
         self.skipped = 0
+        self.renamed = 0
         self.errors = []
         self.current = ""
         self.started = time.time()
@@ -135,11 +144,11 @@ class Job:
         with self.lock:
             rate = self.rate() if self.state == "running" else 0.0
             return {
-                "id": self.id, "direction": "upload" if self.upload else "download",
+                "id": self.id, "direction": self.kind,
                 "sources": self.sources, "dest": self.dest, "state": self.state,
                 "total": self.total, "done": self.done,
                 "files_total": self.files_total, "files_done": self.files_done,
-                "skipped": self.skipped, "errors": self.errors[-50:],
+                "skipped": self.skipped, "renamed": self.renamed, "errors": self.errors[-50:],
                 "error_count": len(self.errors), "current": self.current,
                 "rate": rate,
                 "eta": (self.total - self.done) / rate if rate > 0 else None,
@@ -256,12 +265,58 @@ class Hub:
     # --- jobs ---------------------------------------------------------------
 
     def start_job(self, upload, sources, dest, resume, jobs):
-        job = Job(upload, sources, dest)
+        job = Job("upload" if upload else "download", sources, dest)
         with self.jobs_lock:
             self.jobs[job.id] = job
         threading.Thread(target=self._run_job, args=(job, resume, jobs),
                          daemon=True).start()
         return job
+
+    def start_remote_copy(self, move, sources, dest):
+        """Copies or moves files between folders/drives of the PS5 itself."""
+        job = Job("move" if move else "copy", sources, dest)
+        with self.jobs_lock:
+            self.jobs[job.id] = job
+        threading.Thread(target=self._run_remote_copy, args=(job,), daemon=True).start()
+        return job
+
+    def _run_remote_copy(self, job):
+        host, port = self.target()
+        try:
+            with ps5cable.Connection(host, port) as c:
+                plan, renamed, to_delete = ps5cable.plan_remote_copy(
+                    c, job.sources, job.dest, move=job.kind == "move")
+            with job.lock:
+                job.total = sum(w[2] for w in plan)
+                job.files_total = len(plan)
+                job.renamed = renamed
+                job.state = "running"
+            failures = ps5cable.run_remote_copy(host, port, plan, on_bytes=job.add_bytes,
+                                                on_file=job.file_done, cancel=job.cancel)
+            if to_delete and not job.cancel.is_set():
+                failed = [w[0] for w, _ in failures]
+                with ps5cable.Connection(host, port) as c:
+                    c.sock.settimeout(REMOTE_DELETE_TIMEOUT)
+                    for src in to_delete:
+                        if any(f == src or f.startswith(src + "/") for f in failed):
+                            with job.lock:
+                                job.errors.append({"file": src, "error": "kept the original "
+                                                   "because some of its files failed to copy"})
+                            continue
+                        c.delete(src, recursive=True)
+            with job.lock:
+                if job.cancel.is_set():
+                    job.state = "cancelled"
+                else:
+                    job.state = "failed" if job.errors else "done"
+        except Exception as e:
+            with job.lock:
+                job.errors.append({"file": "", "error": str(e)})
+                job.state = "cancelled" if job.cancel.is_set() else "failed"
+        finally:
+            with job.lock:
+                job.finished = time.time()
+            self.places_cache = None
 
     def _run_job(self, job, resume, jobs):
         host, port = self.target()
@@ -370,11 +425,43 @@ def remote_list(hub, path):
     path = path or "/"
     with hub.conn() as c:
         raw = c.listdir(path)
+        try:
+            free, total = c.df(path)
+        except ps5cable.RemoteError:
+            free = total = None
     entries = [{"name": n, "dir": k == ps5cable.KIND_DIR, "size": s, "mtime": m,
-                "hidden": n.startswith(".")}
+                "hidden": n.startswith("."),
+                "protected": bool(protected_reason(posixpath.join(path, n)))}
                for n, k, s, m in raw]
     parent = None if path == "/" else (posixpath.dirname(path.rstrip("/")) or "/")
-    return {"path": path, "parent": parent, "sep": "/", "entries": entries}
+    return {"path": path, "parent": parent, "sep": "/", "entries": entries,
+            "free": free, "total": total}
+
+
+def protected_reason(path):
+    """Why `path` must not be deleted, renamed or moved, or None if it may."""
+    if not path.startswith("/"):
+        return f"{path}: PS5 paths must be absolute"
+    p = posixpath.normpath(path)
+    if p.startswith("//"):
+        p = p[1:]
+    parts = [x for x in p.split("/") if x]
+    if len(parts) <= 1:
+        return f"{p} is a top-level PS5 folder"
+    if parts[0] in SYSTEM_ROOTS:
+        return f"{p} is part of the PS5 system software"
+    if len(parts) == 2 and parts[0] == "mnt":
+        return f"{p} is a drive mount point"
+    if len(parts) == 2 and parts[0] == "user":
+        return f"{p} is a PS5 system folder"
+    return None
+
+
+def check_unprotected(paths):
+    for p in paths:
+        reason = protected_reason(p)
+        if reason:
+            raise ApiError(f"Not allowed: {reason}.", HTTPStatus.FORBIDDEN)
 
 
 # Folder conventions the PS5 scene tools already scan, as used by ps5upload
@@ -737,10 +824,11 @@ def api_remote_mkdir(hub, args):
 
 def api_remote_delete(hub, args):
     _require(args, "paths")
+    paths = _path_list(args, "paths")
+    check_unprotected(paths)
     with hub.conn() as c:
-        for p in args["paths"]:
-            if p in ("/", ""):
-                raise ApiError("refusing to delete /")
+        c.sock.settimeout(REMOTE_DELETE_TIMEOUT)
+        for p in paths:
             c.delete(p, recursive=True)
     hub.places_cache = None
     return {"ok": True}
@@ -748,10 +836,63 @@ def api_remote_delete(hub, args):
 
 def api_remote_rename(hub, args):
     _require(args, "src", "dst")
+    check_unprotected([args["src"], args["dst"]])
     with hub.conn() as c:
+        if c.stat(args["dst"]) is not None:
+            raise ApiError(f"{args['dst']} already exists on the PS5", HTTPStatus.CONFLICT)
         c.rename(args["src"], args["dst"])
     hub.places_cache = None
     return {"ok": True}
+
+
+def api_remote_copy(hub, args):
+    """Copies or moves PS5 files/folders into another PS5 folder, on the console."""
+    _require(args, "sources", "dest")
+    sources = _path_list(args, "sources")
+    move = bool(args.get("move"))
+    if move:
+        check_unprotected(sources)
+    if not str(args["dest"]).startswith("/"):
+        raise ApiError("destination must be an absolute PS5 path")
+    # Plan up front so mistakes (name taken, folder into itself) come back
+    # as an error here rather than as a failed job.
+    with hub.conn() as c:
+        st = c.stat(args["dest"])
+        if st is None or st[0] != ps5cable.KIND_DIR:
+            raise ApiError(f"No such folder on the PS5: {args['dest']}", HTTPStatus.NOT_FOUND)
+        dest = posixpath.normpath(args["dest"])
+        for src in sources:
+            src = posixpath.normpath(src)
+            if c.stat(src) is None:
+                raise ApiError(f"No such file or folder on the PS5: {src}", HTTPStatus.NOT_FOUND)
+            if dest == src or dest.startswith(src.rstrip("/") + "/"):
+                raise ApiError(f"Can't {'move' if move else 'copy'} {src} into itself")
+            if posixpath.dirname(src) != dest and \
+                    c.stat(posixpath.join(dest, posixpath.basename(src))) is not None:
+                raise ApiError(f"{posixpath.join(dest, posixpath.basename(src))} already "
+                               "exists on the PS5", HTTPStatus.CONFLICT)
+    return hub.start_remote_copy(move, sources, dest).to_dict()
+
+
+def api_remote_size(hub, args):
+    """Total size of PS5 files/folders, counted on the console."""
+    paths = _path_list(args, "paths")
+    out = []
+    with hub.conn() as c:
+        c.sock.settimeout(REMOTE_DELETE_TIMEOUT)
+        for p in paths:
+            size, files, folders = c.du(p)
+            out.append({"path": p, "size": size, "files": files, "folders": folders})
+    return {"items": out, "size": sum(i["size"] for i in out),
+            "files": sum(i["files"] for i in out), "folders": sum(i["folders"] for i in out)}
+
+
+def _path_list(args, key):
+    paths = args.get(key)
+    if not isinstance(paths, list) or not paths or \
+            not all(isinstance(p, str) and p.startswith("/") for p in paths):
+        raise ApiError(f"'{key}' must be a non-empty list of absolute PS5 paths")
+    return paths
 
 
 def api_transfer(hub, args):
@@ -810,6 +951,8 @@ ROUTES = {
     ("POST", "/api/remote/mkdir"): api_remote_mkdir,
     ("POST", "/api/remote/delete"): api_remote_delete,
     ("POST", "/api/remote/rename"): api_remote_rename,
+    ("POST", "/api/remote/copy"): api_remote_copy,
+    ("POST", "/api/remote/size"): api_remote_size,
     ("POST", "/api/transfer"): api_transfer,
     ("POST", "/api/jobs/cancel"): api_cancel,
     ("POST", "/api/jobs/clear"): api_clear,

@@ -89,7 +89,21 @@ Download **`ps5cable-windows`** from the GitHub Actions artifacts or from a rele
    - Click **Send to PS5 →**, or just drag the selection from the left pane onto the right one.
 5. The **Transfers** panel shows each job's progress, speed and ETA, with a Cancel button. Folders are copied with everything inside.
 
-Going the other way works the same way: select files on the PS5 side and click **← Copy to PC**, and they land in the folder open on the left. The PS5 pane can also create folders, rename, and delete (with confirmation).
+Going the other way works the same way: select files on the PS5 side and click **← Copy to PC**, and they land in the folder open on the left.
+
+### Managing files on the PS5
+
+The PS5 pane is a file manager for the console, so you can clean up and reorganise from the PC:
+
+- **Delete** removes the selected files and folders (folders with everything inside) after a confirmation. It can't be undone.
+- **Rename**, **New folder**.
+- **Copy to…** and **Move to…** offer the console's drives and game folders, or any folder you type. The copy runs on the PS5 itself, so nothing crosses the cable, and it shows up in Transfers with progress and Cancel. A move within one drive is instant. A move to another drive (e.g. internal → USB or M.2) copies and then deletes the original, because renaming across drives crashes the PS5. The original is kept if any file failed to copy. Copying into the same folder makes `name (copy)`.
+- **Size** counts a folder on the console (files, subfolders and total) and shows it in the size column. With nothing selected it counts the open folder.
+- The header shows the free space of the drive you're in.
+- **Right-click** an item for all of these, plus **Download to PC** and **Copy path**.
+- Shortcuts: **Del** delete, **F2** rename, **Ctrl+C / Ctrl+X / Ctrl+V** copy, cut and paste between PS5 folders, **Ctrl+A** select all, **Enter** open a folder, **Backspace** go up.
+
+System folders are locked (🔒) and can't be deleted, renamed or moved from the Hub. That covers every top-level folder (`/system`, `/data`, `/user`, `/mnt`…), anything under `/system*`, `/preinst*` and `/update`, drive mount points such as `/mnt/usb0`, and `/user/app`, `/user/home` and the like. Everything below those, such as `/data/homebrew/PPSA01234` or `/mnt/usb0/homebrew`, is yours to manage. Deleting an installed game's folder from `/user/app` is possible but leaves a broken tile; uninstall from the PS5 instead.
 
 **Skip / resume existing** is on by default. Files already complete on the destination are skipped, and partly copied ones continue from where they stopped, so re-running a cancelled or interrupted transfer only sends what's missing. **Parallel** sets the number of connections (default 4). The app remembers the PS5 IP and the last folder on each side.
 
@@ -106,7 +120,7 @@ These follow the conventions of [ps5upload](https://github.com/phantomptr/ps5upl
 | `<drive>/exfat` | Game images (`.exfat`, `.ffpkg`) for image mounting. |
 | `/user/data/ps5upload/pkg_library` | `.pkg` files kept for ps5upload's installer. |
 
-Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. Moving files *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; copy instead.
+Extra folders listed as `scanpath=` lines in `/data/shadowmount/config.ini` show up in the menu too. Copying a `.pkg` only puts the file on the console; install it afterwards with etaHEN's package installer or ps5upload. A plain rename *between drives* is refused, because a cross-drive rename crashes the PS5 kernel; the Hub's **Move to…** copies and then deletes instead.
 
 ### Converting games (packages, game images, folders)
 
@@ -148,7 +162,9 @@ On FW 13.60 a PS5 fake package installs but won't play, so for PS5 games make a 
    python pc/ps5cable.py ls /data
    python pc/ps5cable.py df /data
    python pc/ps5cable.py mkdir /data/homebrew/new
-   python pc/ps5cable.py mv /data/a.bin /data/b.bin
+   python pc/ps5cable.py mv /data/a.bin /data/b.bin           # same drive only
+   python pc/ps5cable.py cp /data/homebrew/PPSA01234 /mnt/usb0/homebrew  # copy on the console
+   python pc/ps5cable.py du /data/homebrew/PPSA01234          # folder size
    python pc/ps5cable.py rm -r /data/homebrew/old
 
    python pc/ps5cable.py status     # connected? which adapter, and how fast it can go

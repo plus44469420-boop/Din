@@ -175,9 +175,84 @@ class HubTest(unittest.TestCase):
         self.assertTrue((root / "z" / "b").is_dir())
         self.api("POST", "/api/remote/delete", {"paths": [str(root / "z")]})
         self.assertFalse((root / "z").exists())
+        for p in ("/", "/system/common", "/system_ex", "/mnt/usb0", "/user/app", "/data", "/data/../system"):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.api("POST", "/api/remote/delete", {"paths": [p]})
+            self.assertEqual(cm.exception.code, 403, p)
+            self.assertIn("Not allowed", json.loads(cm.exception.read())["error"])
         with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.api("POST", "/api/remote/delete", {"paths": ["/"]})
-        self.assertEqual(cm.exception.code, 400)
+            self.api("POST", "/api/remote/rename", {"src": str(root), "dst": "/system/x"})
+        self.assertEqual(cm.exception.code, 403)
+
+        (root / "one").mkdir()
+        (root / "two").mkdir()
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.api("POST", "/api/remote/rename", {"src": str(root / "one"), "dst": str(root / "two")})
+        self.assertEqual(cm.exception.code, 409)
+        self.assertTrue((root / "one").is_dir())
+
+        listing = self.api("GET", "/api/remote/list?path=/")
+        self.assertGreater(listing["total"], 0)
+        self.assertTrue(all(e["protected"] for e in listing["entries"]))
+        listing = self.api("GET", "/api/remote/list?path=" + str(root))
+        self.assertFalse(any(e["protected"] for e in listing["entries"]))
+
+    def test_remote_copy_move_and_size(self):
+        root = self.tmp / "cm"
+        game = root / "homebrew" / "PPSA01234"
+        (game / "sce_sys").mkdir(parents=True)
+        (game / "eboot.bin").write_bytes(random.Random(3).randbytes(2_000_000))
+        (game / "sce_sys" / "param.json").write_text("{}")
+        (root / "usb").mkdir()
+        want = tree_digest(game)
+
+        size = self.api("POST", "/api/remote/size", {"paths": [str(game)]})
+        self.assertEqual((size["size"], size["files"], size["folders"]), (2_000_002, 2, 1))
+
+        job = self.api("POST", "/api/remote/copy", {"sources": [str(game)], "dest": str(root / "usb")})
+        self.assertEqual(job["direction"], "copy")
+        job = self.wait_job(job["id"])
+        self.assertEqual(job["state"], "done", job)
+        self.assertEqual((job["files_total"], job["total"]), (2, 2_000_002))
+        self.assertEqual(tree_digest(root / "usb" / "PPSA01234"), want)
+
+        job = self.wait_job(self.api("POST", "/api/remote/copy",
+                                     {"sources": [str(game)], "dest": str(root / "homebrew")})["id"])
+        self.assertEqual(job["state"], "done", job)
+        self.assertEqual(tree_digest(root / "homebrew" / "PPSA01234 (copy)"), want)
+
+        for body, code in (({"sources": [str(game)], "dest": str(root / "usb")}, 409),
+                           ({"sources": [str(root)], "dest": str(game)}, 400),
+                           ({"sources": [str(root / "nope")], "dest": str(root)}, 404),
+                           ({"sources": ["/user/app"], "dest": str(root), "move": True}, 403)):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.api("POST", "/api/remote/copy", body)
+            self.assertEqual(cm.exception.code, code, body)
+
+        (root / "moved").mkdir()
+        job = self.wait_job(self.api("POST", "/api/remote/copy", {
+            "sources": [str(root / "homebrew" / "PPSA01234 (copy)")], "dest": str(root / "moved"),
+            "move": True})["id"])
+        self.assertEqual((job["state"], job["renamed"], job["files_total"]), ("done", 1, 0), job)
+        self.assertFalse((root / "homebrew" / "PPSA01234 (copy)").exists())
+        self.assertEqual(tree_digest(root / "moved" / "PPSA01234 (copy)"), want)
+
+    @unittest.skipUnless(os.path.isdir("/dev/shm") and os.stat("/dev/shm").st_dev != os.stat(tempfile.gettempdir()).st_dev,
+                         "needs a second filesystem")
+    def test_move_across_drives_copies_then_deletes(self):
+        game = self.tmp / "xdev" / "PPSA05555"
+        game.mkdir(parents=True)
+        (game / "eboot.bin").write_bytes(b"x" * 100_000)
+        want = tree_digest(game)
+        other = Path(tempfile.mkdtemp(prefix="ps5cable-drive2-", dir="/dev/shm"))
+        try:
+            job = self.wait_job(self.api("POST", "/api/remote/copy", {
+                "sources": [str(game)], "dest": str(other), "move": True})["id"])
+            self.assertEqual((job["state"], job["renamed"], job["files_total"]), ("done", 0, 1), job)
+            self.assertFalse(game.exists())
+            self.assertEqual(tree_digest(other / "PPSA05555"), want)
+        finally:
+            shutil.rmtree(other, ignore_errors=True)
 
     def test_local_list(self):
         d = self.tmp / "ll"

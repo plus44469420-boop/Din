@@ -155,6 +155,73 @@ class ServerTest(unittest.TestCase):
             self.assertGreater(total, 0)
             self.assertLessEqual(free, total)
 
+    def test_copy_on_console_in_chunks(self):
+        data = random.Random(9).randbytes(3 * 1024 * 1024 + 5)
+        (self.remote / "src.bin").write_bytes(data)
+        seen = []
+        with self.conn() as c:
+            c.copy_file(str(self.remote / "src.bin"), str(self.remote / "new" / "dst.bin"),
+                        progress=seen.append, chunk=1024 * 1024)
+            self.assertEqual((self.remote / "new" / "dst.bin").read_bytes(), data)
+            self.assertEqual(seen, [1024 * 1024] * 3 + [5])
+
+            (self.remote / "part.bin").write_bytes(data[:777] + b"garbage")
+            c.copy_file(str(self.remote / "src.bin"), str(self.remote / "part.bin"), offset=777)
+            self.assertEqual((self.remote / "part.bin").read_bytes(), data)
+
+            (self.remote / "empty").write_bytes(b"")
+            c.copy_file(str(self.remote / "empty"), str(self.remote / "empty2"))
+            self.assertEqual((self.remote / "empty2").read_bytes(), b"")
+
+            with self.assertRaisesRegex(ps5cable.RemoteError, "same file"):
+                c.copy_file(str(self.remote / "src.bin"), str(self.remote / "src.bin"))
+            with self.assertRaisesRegex(ps5cable.RemoteError, "not a regular file"):
+                c.copy_file(str(self.remote), str(self.tmp / "x"))
+            self.assertEqual((self.remote / "src.bin").read_bytes(), data)
+
+    def test_du_counts_tree(self):
+        src = self.remote / "PPSA00000"
+        self.make_tree(src)
+        files = [p for p in src.rglob("*") if p.is_file()]
+        with self.conn() as c:
+            size, nfiles, folders = c.du(str(src))
+            self.assertEqual(size, sum(p.stat().st_size for p in files))
+            self.assertEqual(nfiles, len(files))
+            self.assertEqual(folders, sum(1 for p in src.rglob("*") if p.is_dir()))
+            self.assertEqual(c.du(str(src / "eboot.bin"))[1], 1)
+            with self.assertRaises(ps5cable.RemoteError):
+                c.du(str(self.remote / "missing"))
+
+    def test_cp_tree_and_cancel(self):
+        src = self.remote / "PPSA00000"
+        self.make_tree(src)
+        (self.remote / "dest").mkdir()
+        rc, _ = run_cli(*self.base, "cp", str(src), str(self.remote / "dest"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(tree_digest(src), tree_digest(self.remote / "dest" / "PPSA00000"))
+        with self.assertRaisesRegex(SystemExit, "already exists"):
+            run_cli(*self.base, "cp", str(src), str(self.remote / "dest"))
+
+        rc, out = run_cli(*self.base, "du", str(src))
+        self.assertEqual(rc, 0)
+        self.assertIn("44 files, 4 folders", out)
+
+        cancel = threading.Event()
+        with self.conn() as c:
+            plan, _, _ = ps5cable.plan_remote_copy(c, [str(src)], str(self.remote))
+        plan.sort(key=lambda w: w[2], reverse=True)
+        self.assertTrue((self.remote / "PPSA00000 (copy)" / "empty_dir").is_dir())
+        old = ps5cable.COPY_CHUNK
+        ps5cable.COPY_CHUNK = 1024 * 1024
+        try:
+            failures = ps5cable.run_remote_copy("127.0.0.1", self.port, plan,
+                                                on_bytes=lambda n: cancel.set(), cancel=cancel)
+        finally:
+            ps5cable.COPY_CHUNK = old
+        self.assertEqual(failures, [])
+        copied = [p for p in (self.remote / "PPSA00000 (copy)").rglob("*") if p.is_file()]
+        self.assertEqual(copied, [], "the half-copied file is removed on cancel")
+
     def test_errors_keep_connection_usable(self):
         with self.conn() as c:
             with self.assertRaisesRegex(ps5cable.RemoteError, "No such file"):

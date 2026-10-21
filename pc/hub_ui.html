@@ -178,6 +178,19 @@
   .menu small { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
   .menu .tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #1b2a44; color: #9cc2ff; align-self: center; }
   .menu .tag.new { background: #2a2414; color: #fcd34d; }
+  .menu.ctx { width: 250px; }
+  .menu.ctx button { grid-template-columns: 18px 1fr auto; align-items: center; padding: 6px 10px; }
+  .menu.ctx button svg { width: 15px; height: 15px; color: var(--muted); }
+  .menu.ctx button.danger svg { color: #f87171; }
+  .menu.ctx kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .menu.ctx hr { border: none; border-top: 1px solid var(--border); margin: 4px 6px; }
+  .menu.ctx button:disabled { opacity: .4; }
+  tr.cut { opacity: .45; }
+  tr.locked td.name span::after { content: " 🔒"; font-size: 11px; opacity: .7; }
+  .size-sum { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  .size-sum b { font-size: 22px; color: var(--text); font-family: var(--mono); }
+  .size-sum ul { margin: 0; padding-left: 18px; max-height: 200px; overflow: auto; }
+  .size-sum li { display: flex; gap: 10px; } .size-sum li span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rail .tip { font-size: 11.5px; color: #fcd34d; background: #2a210c; border: 1px solid #6b4a12; border-radius: 10px; padding: 8px 10px; line-height: 1.35; }
   .conn input { width: 140px; border: none; background: transparent; padding: 4px 2px; font-family: var(--mono); }
   .conn input:focus { box-shadow: none; }
@@ -283,6 +296,7 @@
   .job-top .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .job-top .dir { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #1b2a44; color: #9cc2ff; font-weight: 700; }
   .job-top .dir.down { background: #1d3326; color: #86efac; }
+  .job-top .dir.on-ps5 { background: #2a1f3d; color: #d8b4fe; }
   .job .meta { display: flex; gap: 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .job .meta .state-done { color: var(--ok); }
   .job .meta .state-failed { color: var(--bad); }
@@ -395,6 +409,13 @@ const ICONS = {
   rename: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13h8l1-13"/></svg>',
   open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/></svg>',
+  cut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.1 15.9L20 4M15.9 15.9L4 4"/></svg>',
+  paste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/></svg>',
+  move: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 13h6m-2-2.5l2.5 2.5-2.5 2.5"/></svg>',
+  size: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-9-9v9z"/><path d="M15 3.5A9 9 0 0120.5 9H15z"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
   plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 2v5m6-5v5M7 7h10v4a5 5 0 01-10 0zM12 16v6"/></svg>',
 };
 
@@ -473,14 +494,16 @@ function modal({ title, text, input, okText = "OK", danger = false, extra }) {
 
 // ---------------------------------------------------------------- state
 
-const app = { connected: false, status: null, settings: null, showHidden: false, jobs: [], seenDone: new Set() };
+const app = { connected: false, status: null, settings: null, showHidden: false, jobs: [], seenDone: new Set(),
+  clip: null, activePane: null };
 
 class Pane {
   constructor(side) {
     this.side = side;               // "local" | "remote"
     this.root = $(`pane-${side}`);
     this.path = null; this.parent = null; this.sep = "/";
-    this.entries = []; this.sel = new Set(); this.anchor = null;
+    this.entries = []; this.sel = new Set(); this.anchor = null; this.sizes = new Map();
+    this.root.addEventListener("mousedown", () => { app.activePane = this; });
     this.sort = { key: "name", dir: 1 }; this.filter = ""; this.places = [];
     this.loading = false; this.error = null; this.editing = false;
     this.build();
@@ -546,11 +569,21 @@ class Pane {
         el("button", { class: "ghost", title: "New folder", html: ICONS.newdir + "New folder", onclick: () => this.newFolder() }),
         el("button", { class: "ghost", title: "Open in Explorer/Finder", html: ICONS.open, onclick: () => this.path && api("POST", "/api/local/open", { path: this.path }).catch((e) => toast(e.message, "err")) }));
     } else {
-      const off = !app.connected;
+      const off = !app.connected, locked = this.lockedSelection();
+      const lockTip = locked ? ` (${locked} is a protected system folder)` : "";
+      if (app.clip) {
+        this.actions.append(el("button", { class: "ghost", title: `${app.clip.move ? "Move" : "Copy"} ${app.clip.paths.length} item(s) here (Ctrl+V)`,
+          html: ICONS.paste + `Paste ${app.clip.paths.length}`, disabled: off || !this.path, onclick: () => this.paste() }));
+      }
       this.actions.append(
-        el("button", { class: "ghost", html: ICONS.newdir + "New folder", disabled: off, onclick: () => this.newFolder() }),
-        el("button", { class: "ghost", html: ICONS.rename + "Rename", disabled: off || n !== 1, onclick: () => this.rename() }),
-        el("button", { class: "ghost danger", html: ICONS.trash + "Delete", disabled: off || n === 0, onclick: () => this.remove() }));
+        el("button", { class: "ghost icon", title: "New folder", html: ICONS.newdir, disabled: off, onclick: () => this.newFolder() }),
+        el("button", { class: "ghost icon", title: "Rename (F2)" + lockTip, html: ICONS.rename, disabled: off || n !== 1 || !!locked, onclick: () => this.rename() }),
+        el("button", { class: "ghost icon", title: "Size of the selection, or of this folder", html: ICONS.size, disabled: off || !this.path, onclick: () => this.showSize() }),
+        el("button", { class: "ghost", title: "Copy to another PS5 folder or drive. The data stays on the console", html: ICONS.copy + "Copy to…",
+          disabled: off || n === 0, onclick: (e) => this.copyTo(e.currentTarget, false) }),
+        el("button", { class: "ghost", title: "Move to another PS5 folder or drive" + lockTip, html: ICONS.move + "Move to…",
+          disabled: off || n === 0 || !!locked, onclick: (e) => this.copyTo(e.currentTarget, true) }),
+        el("button", { class: "ghost danger", title: "Delete (Del)" + lockTip, html: ICONS.trash + "Delete", disabled: off || n === 0 || !!locked, onclick: () => this.remove() }));
     }
   }
   renderPlaces() {
@@ -633,16 +666,28 @@ class Pane {
       th("name", "Name", "name"), th("size", "Size", "size"), th("mtime", "Modified", "date")));
     const body = el("tbody");
     rows.forEach((e, idx) => {
-      const tr = el("tr", { class: (e.dir ? "dir " : "") + (this.sel.has(e.name) ? "sel " : "") + (e.hidden ? "hidden-file" : ""),
+      const full = this.join(e.name);
+      const cut = !this.isLocal && app.clip && app.clip.move && app.clip.paths.includes(full);
+      const known = this.sizes && this.sizes.get(e.name);
+      const tr = el("tr", { class: (e.dir ? "dir " : "") + (this.sel.has(e.name) ? "sel " : "") + (e.hidden ? "hidden-file " : "")
+          + (cut ? "cut " : "") + (e.protected ? "locked" : ""),
         draggable: "true", "data-idx": idx },
         el("td", { class: "cb" }, el("input", { type: "checkbox", checked: this.sel.has(e.name),
           onclick: (ev) => { ev.stopPropagation(); this.toggle(e.name, idx, ev, true); } })),
-        el("td", { class: "name", title: e.name, html: e.dir ? ICONS.folder : ICONS.file }),
-        el("td", { class: "size" }, e.dir ? "" : human(e.size)),
+        el("td", { class: "name", title: e.protected ? `${e.name}\nProtected PS5 system folder: it can't be deleted, renamed or moved from here` : e.name,
+          html: e.dir ? ICONS.folder : ICONS.file }),
+        el("td", { class: "size", title: known ? `${known.files} files, ${known.folders} folders` : "" },
+          e.dir ? (known ? human(known.size) : "") : human(e.size)),
         el("td", { class: "date" }, fmtDate(e.mtime)));
       tr.children[1].append(el("span", {}, e.name));
       tr.addEventListener("click", (ev) => this.toggle(e.name, idx, ev, false));
       tr.addEventListener("dblclick", () => { if (e.dir) this.load(this.join(e.name)); });
+      tr.addEventListener("contextmenu", (ev) => {
+        if (this.isLocal) return;
+        ev.preventDefault();
+        if (!this.sel.has(e.name)) { this.sel.clear(); this.sel.add(e.name); this.anchor = idx; this.renderList(); }
+        this.contextMenu(ev.clientX, ev.clientY, e);
+      });
       tr.addEventListener("dragstart", (ev) => {
         // Re-rendering here would detach the dragged row and Chrome would
         // cancel the drag, so update the selection styling in place.
@@ -702,9 +747,9 @@ class Pane {
       const d = await api("GET", `/api/${this.side}/list` + qs(path ? { path } : {}));
       const changed = d.path !== this.path;
       this.path = d.path; this.parent = d.parent; this.sep = d.sep; this.entries = d.entries; this.error = null;
-      if (changed) { this.sel.clear(); this.anchor = null; this.filter = ""; this.filterEl.value = ""; }
+      if (changed) { this.sel.clear(); this.anchor = null; this.filter = ""; this.filterEl.value = ""; this.sizes = new Map(); }
       else { const names = new Set(d.entries.map((e) => e.name)); for (const n of [...this.sel]) if (!names.has(n)) this.sel.delete(n); }
-      if (this.isLocal && d.total) this.freeEl.textContent = `${human(d.free)} free of ${human(d.total)}`;
+      this.freeEl.textContent = d.total ? `${human(d.free)} free of ${human(d.total)}` : "";
     } catch (e) {
       this.error = e.message;
       if (path !== this.path) toast(e.message, "err");
@@ -738,6 +783,153 @@ class Pane {
     try { await api("POST", "/api/remote/delete", { paths }); this.sel.clear(); toast("Deleted", "ok"); await this.load(this.path); }
     catch (e) { toast(e.message, "err"); await this.load(this.path); }
   }
+
+  lockedSelection() {
+    const e = this.entries.find((x) => x.protected && this.sel.has(x.name));
+    return e ? e.name : null;
+  }
+  setClip(move) {
+    if (!this.sel.size) return;
+    app.clip = { move, paths: this.selectedPaths() };
+    toast(`${move ? "Cut" : "Copied"} ${app.clip.paths.length} item(s). Open a folder and paste (Ctrl+V).`);
+    this.renderList();
+  }
+  async paste() {
+    if (!app.clip || !this.path) return;
+    const { move, paths } = app.clip;
+    if (await remoteCopy(paths, this.path, move) && move) { app.clip = null; this.renderList(); }
+  }
+  async copyTo(anchor, move) {
+    const paths = this.selectedPaths();
+    if (!paths.length) return;
+    const dest = await pickRemoteFolder(anchor, move, this.path);
+    if (dest) await remoteCopy(paths, dest, move);
+  }
+  async showSize() {
+    const paths = this.sel.size ? this.selectedPaths() : [this.path];
+    toast("Counting on the PS5…");
+    try {
+      const d = await api("POST", "/api/remote/size", { paths });
+      for (const it of d.items) {
+        const name = it.path.split("/").pop();
+        if (this.sel.size) this.sizes.set(name, it);
+      }
+      this.renderList();
+      const list = d.items.length > 1 ? el("ul", {}, d.items.map((it) =>
+        el("li", {}, el("span", {}, it.path), el("span", {}, human(it.size))))) : null;
+      await modal({ title: d.items.length > 1 ? `${d.items.length} items` : d.items[0].path,
+        extra: el("div", { class: "size-sum" }, el("b", {}, human(d.size)),
+          el("span", {}, `${d.files.toLocaleString()} files, ${d.folders.toLocaleString()} folders`), list),
+        okText: "Close" });
+    } catch (e) { toast(e.message, "err"); }
+  }
+  contextMenu(x, y, entry) {
+    closeMenus();
+    const n = this.sel.size, locked = this.lockedSelection(), off = !app.connected;
+    const item = (icon, label, key, fn, opts = {}) => el("button", { class: opts.danger ? "danger" : "", disabled: !!opts.disabled,
+      title: opts.title || "", onclick: (e) => { menu.remove(); fn(e); } },
+      el("span", { html: icon }), el("span", {}, label), el("kbd", {}, key || ""));
+    const lockTip = locked ? `${locked} is a protected system folder` : "";
+    const menu = el("div", { class: "menu ctx" },
+      n === 1 && entry.dir ? item(ICONS.folder, "Open", "Enter", () => this.load(this.join(entry.name))) : null,
+      item(ICONS.down, "Download to PC", "", () => startTransfer("download"), { disabled: off || !local.path }),
+      el("hr"),
+      item(ICONS.copy, "Copy", "Ctrl+C", () => this.setClip(false)),
+      item(ICONS.cut, "Cut", "Ctrl+X", () => this.setClip(true), { disabled: !!locked, title: lockTip }),
+      item(ICONS.paste, app.clip ? `Paste ${app.clip.paths.length} here` : "Paste", "Ctrl+V", () => this.paste(), { disabled: !app.clip }),
+      item(ICONS.copy, "Copy to…", "", () => this.copyTo(this.actions, false)),
+      item(ICONS.move, "Move to…", "", () => this.copyTo(this.actions, true), { disabled: !!locked, title: lockTip }),
+      el("hr"),
+      item(ICONS.rename, "Rename", "F2", () => this.rename(), { disabled: n !== 1 || !!locked, title: lockTip }),
+      item(ICONS.size, "Size", "", () => this.showSize()),
+      item(ICONS.link, n > 1 ? "Copy paths" : "Copy path", "", () => copyText(this.selectedPaths().join("\n"))),
+      el("hr"),
+      item(ICONS.trash, `Delete${n > 1 ? ` ${n} items` : ""}`, "Del", () => this.remove(), { danger: true, disabled: !!locked, title: lockTip }));
+    document.body.append(menu);
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+    dismissOnOutsideClick(menu);
+  }
+}
+
+function closeMenus() { document.querySelectorAll(".menu").forEach((m) => m.remove()); }
+
+function dismissOnOutsideClick(menu) {
+  setTimeout(() => {
+    const off = (e) => {
+      if (e.type === "keydown" && e.key !== "Escape") return;
+      if (e.type !== "keydown" && menu.contains(e.target)) return;
+      menu.remove();
+      document.removeEventListener("mousedown", off); document.removeEventListener("keydown", off);
+    };
+    document.addEventListener("mousedown", off); document.addEventListener("keydown", off);
+  }, 0);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("Copied to the clipboard", "ok"); }
+  catch (e) { toast(text); }
+}
+
+// Destinations offered by "Copy to…" / "Move to…": the PS5's drives, the game
+// folders scene tools scan, or any typed path.
+function pickRemoteFolder(anchor, move, current) {
+  closeMenus();
+  return new Promise((resolve) => {
+    const menu = el("div", { class: "menu" });
+    const done = (v) => { menu.remove(); resolve(v); };
+    const opt = (path, hint, tag) => el("button", { title: hint || path, onclick: async () => {
+      try {
+        if (tag === "Will be created") { await api("POST", "/api/remote/mkdir", { path }); loadRemotePlaces(true); }
+        done(path);
+      } catch (e) { toast(e.message, "err"); done(null); }
+    } }, el("code", {}, path), tag ? el("span", { class: "tag" + (tag === "Will be created" ? " new" : "") }, tag) : el("span"),
+      hint ? el("small", {}, hint) : null);
+    menu.append(el("h4", {}, `${move ? "Move" : "Copy"} to`));
+    const drives = (remote.places || []).filter((p) => p.drive);
+    if (drives.length) {
+      menu.append(el("h4", {}, "Drives"));
+      for (const d of drives) menu.append(opt(d.path, d.name, d.path === current ? "This folder" : ""));
+    }
+    let group = null;
+    for (const f of app.gameFolders || []) {
+      if (f.drive !== group) { group = f.drive; menu.append(el("h4", {}, `Game folders · ${group}`)); }
+      menu.append(opt(f.path, f.hint, f.path === current ? "This folder" : f.exists ? (f.recommended ? "Recommended" : "") : "Will be created"));
+    }
+    menu.append(el("h4", {}, "Other"));
+    menu.append(el("button", { onclick: async () => {
+      menu.remove();
+      const p = await modal({ title: `${move ? "Move" : "Copy"} to which PS5 folder?`, text: "Type an absolute path, e.g. /mnt/usb0/homebrew. Missing folders are created.",
+        input: current || "/data", okText: move ? "Move here" : "Copy here" });
+      if (!p) return resolve(null);
+      try { await api("POST", "/api/remote/mkdir", { path: p.trim() }); resolve(p.trim()); }
+      catch (e) { toast(e.message, "err"); resolve(null); }
+    } }, el("span", {}, "Type a folder path…"), el("span")));
+    const r = anchor.getBoundingClientRect();
+    document.body.append(menu);
+    const h = menu.getBoundingClientRect().height;
+    menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 440))}px`;
+    menu.style.top = `${r.top - h - 6 > 8 ? r.top - h - 6 : Math.min(r.bottom + 6, window.innerHeight - h - 8)}px`;
+    setTimeout(() => {
+      const off = (e) => {
+        if (e.type === "keydown" && e.key !== "Escape") return;
+        if (e.type !== "keydown" && menu.contains(e.target)) return;
+        document.removeEventListener("mousedown", off); document.removeEventListener("keydown", off);
+        if (document.body.contains(menu)) done(null);
+      };
+      document.addEventListener("mousedown", off); document.addEventListener("keydown", off);
+    }, 0);
+  });
+}
+
+async function remoteCopy(sources, dest, move) {
+  try {
+    await api("POST", "/api/remote/copy", { sources, dest, move });
+    $("transfers").classList.remove("collapsed");
+    pollJobs();
+    return true;
+  } catch (e) { toast(e.message, "err"); return false; }
 }
 
 let dragSide = null;
@@ -1337,20 +1529,22 @@ function jobCard(j) {
   const pct = j.total ? (100 * j.done / j.total) : (j.state === "done" ? 100 : 0);
   const names = j.sources.map((s) => s.split(/[\\/]/).filter(Boolean).pop() || s);
   const title = names.length > 1 ? `${names[0]} + ${names.length - 1} more` : names[0];
-  const up = j.direction === "upload";
+  const up = j.direction === "upload", onPs5 = j.direction === "copy" || j.direction === "move";
+  const label = { upload: "PC → PS5", download: "PS5 → PC", copy: "Copy on PS5", move: "Move on PS5" }[j.direction];
   const stateText = { planning: "Scanning…", running: `${pct.toFixed(1)}%`, done: "Done", failed: "Finished with errors", cancelled: "Cancelled" }[j.state];
   const meta = el("div", { class: "meta" },
     el("span", { class: `state-${j.state}` }, stateText),
-    el("span", {}, `${human(j.done)} / ${human(j.total)}`),
-    el("span", {}, `${j.files_done} / ${j.files_total} files`),
+    j.files_total || !j.renamed ? el("span", {}, `${human(j.done)} / ${human(j.total)}`) : null,
+    j.files_total || !j.renamed ? el("span", {}, `${j.files_done} / ${j.files_total} files`) : null,
     j.state === "running" ? el("span", {}, `${human(j.rate)}/s`) : null,
     j.state === "running" ? el("span", {}, `ETA ${fmtEta(j.eta)}`) : null,
     j.state !== "running" && j.finished ? el("span", {}, `took ${fmtEta(j.finished - j.started)}`) : null,
     j.skipped ? el("span", {}, `${j.skipped} already there, skipped`) : null,
+    j.renamed ? el("span", {}, `${j.renamed} moved instantly (same drive)`) : null,
     el("span", { style: "margin-left:auto; overflow:hidden; text-overflow:ellipsis" }, `→ ${j.dest}`));
   const card = el("div", { class: `job ${j.state}` },
     el("div", { class: "job-top" },
-      el("span", { class: "dir" + (up ? "" : " down") }, up ? "PC → PS5" : "PS5 → PC"),
+      el("span", { class: "dir" + (up ? "" : onPs5 ? " on-ps5" : " down") }, label),
       el("span", { class: "title", title: j.sources.join("\n") }, title),
       (j.state === "running" || j.state === "planning")
         ? el("button", { class: "ghost danger", onclick: () => api("POST", "/api/jobs/cancel", { id: j.id }).catch((e) => toast(e.message, "err")) }, "Cancel")
@@ -1383,9 +1577,13 @@ async function pollJobs() {
     for (const j of jobs) {
       if (["done", "failed", "cancelled"].includes(j.state) && !app.seenDone.has(j.id)) {
         app.seenDone.add(j.id);
-        if (j.state === "done") toast(`${j.direction === "upload" ? "Sent" : "Copied"} ${j.files_total} file${j.files_total === 1 ? "" : "s"} (${human(j.total)})`, "ok");
-        else if (j.state === "failed") toast(`Transfer finished with ${j.error_count} error(s)`, "err");
-        (j.direction === "upload" ? remote : local).load((j.direction === "upload" ? remote : local).path);
+        const onPs5 = j.direction === "copy" || j.direction === "move";
+        if (j.state === "done" && j.direction === "move") toast(`Moved ${j.sources.length} item${j.sources.length === 1 ? "" : "s"} to ${j.dest}`, "ok");
+        else if (j.state === "done") toast(`${{ upload: "Sent", download: "Copied", copy: "Copied on the PS5:" }[j.direction]} ${j.files_total} file${j.files_total === 1 ? "" : "s"} (${human(j.total)})`, "ok");
+        else if (j.state === "failed") toast(`${onPs5 ? (j.direction === "move" ? "Move" : "Copy") : "Transfer"} finished with ${j.error_count} error(s)`, "err");
+        const target = j.direction === "download" ? local : remote;
+        target.load(target.path);
+        if (onPs5) loadRemotePlaces(true);
       }
     }
     renderJobs();
@@ -1433,8 +1631,23 @@ $("opt-jobs").addEventListener("change", (e) => api("POST", "/api/settings", { j
 $("opt-auto").addEventListener("change", (e) => api("POST", "/api/settings", { auto_payload: e.target.checked }));
 $("opt-hidden").addEventListener("change", (e) => { app.showHidden = e.target.checked; local.renderList(); remote.renderList(); });
 document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT") return;
-  if (e.key === "Delete" && remote.sel.size && app.connected) remote.remove();
+  if (e.target.tagName === "INPUT" || document.querySelector(".modal-bg, .cv-bg")) return;
+  const pane = app.activePane || remote, mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+  if (mod && k === "a") { e.preventDefault(); pane.visible().forEach((x) => pane.sel.add(x.name)); pane.renderList(); return; }
+  if (e.key === "Backspace" && pane.parent) { e.preventDefault(); pane.load(pane.parent); return; }
+  if (e.key === "Enter" && pane.sel.size === 1) {
+    const ent = pane.entries.find((x) => pane.sel.has(x.name));
+    if (ent && ent.dir) pane.load(pane.join(ent.name));
+    return;
+  }
+  if (pane !== remote || !app.connected) return;
+  const locked = remote.lockedSelection();
+  if (e.key === "Delete" && remote.sel.size && !locked) remote.remove();
+  else if (e.key === "F2" && remote.sel.size === 1 && !locked) { e.preventDefault(); remote.rename(); }
+  else if (mod && k === "c" && remote.sel.size && !String(window.getSelection())) remote.setClip(false);
+  else if (mod && k === "x" && remote.sel.size && !locked) remote.setClip(true);
+  else if (mod && k === "v" && app.clip) { e.preventDefault(); remote.paste(); }
+  else if (e.key === "Escape" && app.clip) { app.clip = null; remote.renderList(); }
 });
 
 boot().catch((e) => toast(e.message, "err"));
