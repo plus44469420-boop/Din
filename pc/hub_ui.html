@@ -1175,8 +1175,8 @@ function jobCard(j) {
   const stateText = { planning: "Scanning…", running: `${pct.toFixed(1)}%`, done: "Done", failed: "Finished with errors", cancelled: "Cancelled" }[j.state];
   const meta = el("div", { class: "meta" },
     el("span", { class: `state-${j.state}` }, stateText),
-    el("span", {}, `${human(j.done)} / ${human(j.total)}`),
-    el("span", {}, `${j.files_done} / ${j.files_total} files`),
+    j.files_total || !j.renamed ? el("span", {}, `${human(j.done)} / ${human(j.total)}`) : null,
+    j.files_total || !j.renamed ? el("span", {}, `${j.files_done} / ${j.files_total} files`) : null,
     j.state === "running" ? el("span", {}, `${human(j.rate)}/s`) : null,
     j.state === "running" ? el("span", {}, `ETA ${fmtEta(j.eta)}`) : null,
     j.state !== "running" && j.finished ? el("span", {}, `took ${fmtEta(j.finished - j.started)}`) : null,
