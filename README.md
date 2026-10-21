@@ -75,7 +75,13 @@ Check the link from the PC with `ping 192.168.88.2`.
 
 ### 3. Get the app
 
-Download **`ps5cable-windows`** from the GitHub Actions artifacts or from a release. It contains `ps5cable-hub.exe` (the desktop app, with the payload built in), `ps5cable.exe` (the command line), and `ps5cable.elf`. You can also build everything yourself, as described in Building below.
+Download the latest release from [Releases](https://github.com/plus44469420-boop/Din/releases/latest):
+
+- **Windows:** `ps5cable-windows.zip`. Unzip it and run `ps5cable-hub.exe` (the desktop app, with the payload and the game converter built in). It also contains `ps5cable.exe` (the command line), `ps5cable-convert.exe` and `ps5cable.elf`.
+- **Linux:** `ps5cable-linux-x64.tar.gz`. **macOS (Apple Silicon):** `ps5cable-macos-arm64.tar.gz`. Unpack it and run `python3 hub.py`, or `python3 ps5cable.py` for the command line. Python 3.8 or newer is needed.
+- **`ps5cable.elf` on its own**, if you load payloads with a payload manager or autoloader.
+
+You can also build everything yourself, as described in Building below.
 
 ## Using ps5cable Hub (the desktop app)
 
@@ -218,6 +224,8 @@ pip install pyinstaller
 pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 pyinstaller --onefile --console --name ps5cable pc/ps5cable.py
 ```
+
+Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publish them as a GitHub release, with `.github/release-notes.md` as the description.
 
 ## Troubleshooting
 
