@@ -137,9 +137,9 @@ def _system32(exe):
     return str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / exe)
 
 
-def _run(cmd, what):
+def _run(cmd, what, env=None):
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                       creationflags=CREATE_NO_WINDOW)
+                       creationflags=CREATE_NO_WINDOW, env=env)
     out = (p.stdout + p.stderr).strip()
     if p.returncode not in (0, 3010):
         raise DriverError(f"{what} failed ({p.returncode}): {out[-600:]}")
