@@ -55,7 +55,7 @@ USB_SPEED_LABEL = {480: "USB 2.0 Hi-Speed (480 Mbps)",
                    10000: "USB 3.2 Gen 2 (10 Gbps)",
                    12: "USB 1.1 Full Speed (12 Mbps)", 1.5: "USB 1.0 Low Speed"}
 # What a bridge chip actually moves at each bus speed, in MB/s.
-USB_PRACTICAL_MBS = {480: 35.0, 5000: 300.0, 10000: 300.0, 12: 1.0, 1.5: 0.1}
+USB_PRACTICAL_MBS = {480: 35.0, 5000: 250.0, 10000: 250.0, 12: 1.0, 1.5: 0.1}
 
 
 def encode(kind, chan=0, data=b""):

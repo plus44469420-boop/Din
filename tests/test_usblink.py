@@ -61,7 +61,7 @@ class AssessTest(unittest.TestCase):
     def test_usb3_bridge_on_usb3_port(self):
         info = usblink.assess({"chip": "Prolific PL27A1", "chip_mbps": 5000, "usb_mbps": 5000})
         self.assertEqual(info["level"], "ok")
-        self.assertEqual(info["expected_mbs"], 300.0)
+        self.assertEqual(info["expected_mbs"], 250.0)
         self.assertEqual(info["usb_label"], "USB 3.2 Gen 1 (5 Gbps)")
         self.assertIn("SuperSpeed", " ".join(info["notes"]))
 
@@ -78,7 +78,7 @@ class AssessTest(unittest.TestCase):
 
     def test_speedtest_verdict(self):
         info = usblink.assess({"chip": "Prolific PL27A1", "chip_mbps": 5000, "usb_mbps": 5000})
-        self.assertEqual(usblink.interpret_speedtest(info, 280, 290)["verdict"], "ok")
+        self.assertEqual(usblink.interpret_speedtest(info, 200, 240)["verdict"], "ok")
         slow = usblink.interpret_speedtest(info, 36, 38)
         self.assertEqual(slow["verdict"], "warn")
         self.assertIn("USB 2.0", " ".join(slow["notes"]))
