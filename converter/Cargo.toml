@@ -1,0 +1,27 @@
+[package]
+name = "ps5cable-convert"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Game converter for ps5cable Hub: packages, game images and folders, using ps5upload's writers"
+publish = false
+
+# The format writers come from ps5upload (GPL-3.0-or-later), pinned to one commit so a build
+# is reproducible. image_build.rs, folder_build.rs and fpkg_firmware.rs are copied from its
+# engine crate at the same commit; see src/main.rs.
+[dependencies]
+ps5upload-fpkg = { git = "https://github.com/phantomptr/ps5upload", rev = "e83a09a7e4537f63342e5887346bf2712056c194" }
+ps5-dump-forge-ufs2 = { git = "https://github.com/phantomptr/ps5upload", rev = "e83a09a7e4537f63342e5887346bf2712056c194" }
+ps5-dump-forge-pfs = { git = "https://github.com/phantomptr/ps5upload", rev = "e83a09a7e4537f63342e5887346bf2712056c194" }
+blake3 = { version = "1", features = ["rayon"] }
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+ps5upload-pkg = { git = "https://github.com/phantomptr/ps5upload", rev = "e83a09a7e4537f63342e5887346bf2712056c194" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

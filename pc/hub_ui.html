@@ -121,6 +121,50 @@
   .st-result { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #0c111a; }
   .st-result .nums { display: flex; gap: 22px; font-size: 13px; }
   .st-result .nums b { font-size: 18px; font-family: var(--mono); }
+  /* convert */
+  #btn-convert.busy { color: #93c5fd; border-color: #2f7cf655; background: #12305a55; }
+  .cv-bg { position: fixed; inset: 0; z-index: 35; background: #05080dd9; backdrop-filter: blur(3px); display: grid; padding: 22px; }
+  .cv { background: var(--bg); border: 1px solid var(--border); border-radius: 16px; display: grid; grid-template-rows: auto 1fr; overflow: hidden; box-shadow: 0 30px 80px #000c; }
+  .cv-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .cv-head h2 { margin: 0; font-size: 17px; }
+  .cv-head small { color: var(--muted); }
+  .cv-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(340px, 1fr); gap: 16px; padding: 16px; overflow: auto; align-items: start; }
+  .cv-col { display: grid; gap: 14px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+  .card h3 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .card .hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .card .warn-text { color: #fcd34d; font-size: 12px; }
+  .card .err-text { color: #fca5a5; font-size: 12px; }
+  .row-flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row-flex input[type=text] { flex: 1; min-width: 180px; }
+  .tiles { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tile { display: grid; gap: 4px; align-content: start; text-align: left; padding: 10px 12px; border-radius: 10px; white-space: normal; background: var(--panel-2); }
+  .tile b { font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tile span { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  .tile.on { border-color: var(--accent); background: #12305a66; box-shadow: 0 0 0 1px #2f7cf655 inset; }
+  .tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #12305a; color: #93c5fd; }
+  .tag.green { background: #12351f; color: #86efac; }
+  .tag.new { background: #3b2a0c; color: #fcd34d; }
+  .check { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; cursor: pointer; }
+  .check input { margin-top: 2px; }
+  .check small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  .check.disabled { opacity: .5; cursor: default; }
+  .field { display: grid; gap: 4px; font-size: 12.5px; }
+  .field > span { color: var(--muted); }
+  select { background: #0c111a; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .checks { display: grid; gap: 3px; font-size: 12px; max-height: 170px; overflow: auto; }
+  .checks div { display: flex; gap: 6px; } .checks .ok::before { content: "✓"; color: var(--ok); } .checks .bad::before { content: "!"; color: var(--warn); font-weight: 700; padding: 0 2px; }
+  .facts.small { grid-template-columns: 120px 1fr; font-size: 12.5px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  .cvjob { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; background: var(--panel-2); }
+  .cvjob .top { display: flex; gap: 8px; align-items: center; }
+  .cvjob .top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cvjob .bar { height: 6px; background: #0c111a; border-radius: 99px; overflow: hidden; }
+  .cvjob .bar i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .cvjob.done .bar i { background: var(--ok); } .cvjob.failed .bar i { background: var(--bad); }
+  .cvjob small { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+  .cvjob code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
   .pane-head .linkchip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: #3a1418; color: #fca5a5; }
   .pane-head .linkchip.ok { background: #12351f; color: #86efac; }
   .menu {
@@ -292,6 +336,7 @@
     <button class="primary" id="btn-connect">Connect</button>
   </div>
   <button class="ghost" id="btn-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find PS5</button>
+  <button class="ghost" id="btn-convert" title="Convert games: package, game image (.ffpkg/.exfat/.ffpfs/.ffpfsc) or folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"/><rect x="15" y="3" width="6" height="8" rx="1"/><rect x="3" y="13" width="6" height="8" rx="1"/></svg>Convert</button>
   <button class="ghost" id="btn-payload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>Send payload</button>
   <div class="spacer"></div>
   <div class="meter" id="ps5-meter" hidden>
@@ -492,6 +537,11 @@ class Pane {
     this.actions.innerHTML = "";
     const n = this.sel.size;
     if (this.isLocal) {
+      const one = n === 1 ? this.selectedPaths()[0] : null;
+      const convertible = one && (CV_IMAGE_EXT.test(one) || this.entries.some((e) => e.dir && this.join(e.name) === one));
+      this.actions.append(
+        el("button", { class: "ghost", title: "Convert the selected game folder or image (package, game image or folder)", disabled: !convertible,
+          html: "Convert…", onclick: () => openConvert(one) }));
       this.actions.append(
         el("button", { class: "ghost", title: "New folder", html: ICONS.newdir + "New folder", onclick: () => this.newFolder() }),
         el("button", { class: "ghost", title: "Open in Explorer/Finder", html: ICONS.open, onclick: () => this.path && api("POST", "/api/local/open", { path: this.path }).catch((e) => toast(e.message, "err")) }));
@@ -958,6 +1008,315 @@ async function findPs5() {
   } catch (e) { toast(e.message, "err"); }
 }
 
+// ---------------------------------------------------------------- convert
+
+const PLAYGO_LANGUAGES = [
+  ["ja-JP", "日本語"], ["en-US", "English (US)"], ["fr-FR", "Français (France)"], ["es-ES", "Español (España)"],
+  ["de-DE", "Deutsch"], ["it-IT", "Italiano"], ["nl-NL", "Nederlands"], ["pt-PT", "Português (Portugal)"],
+  ["ru-RU", "Русский"], ["ko-KR", "한국어"], ["zh-Hant", "繁體中文"], ["zh-Hans", "简体中文"], ["fi-FI", "Suomi"],
+  ["sv-SE", "Svenska"], ["da-DK", "Dansk"], ["no-NO", "Norsk"], ["pl-PL", "Polski"], ["pt-BR", "Português (Brasil)"],
+  ["en-GB", "English (UK)"], ["tr-TR", "Türkçe"], ["es-419", "Español (Latinoamérica)"], ["ar-AE", "العربية"],
+  ["fr-CA", "Français (Canada)"], ["cs-CZ", "Čeština"], ["hu-HU", "Magyar"], ["el-GR", "Ελληνικά"], ["ro-RO", "Română"],
+  ["th-TH", "ไทย"], ["vi-VN", "Tiếng Việt"], ["id-ID", "Bahasa Indonesia"], ["uk-UA", "Українська"],
+];
+const CV_MAKES = [
+  { id: "pkg", title: "A package (.pkg)", body: "Installs on the PS5 like a game from the store. PS4 games play on any firmware; PS5 games on 11.60 and below." },
+  { id: "image", title: "A game image", body: "One file on a PS5 drive that ShadowMount+ mounts and shows on the home screen. Nothing is installed, and it plays on firmware where a PS5 package will not." },
+  { id: "folder", title: "A game folder", body: "The game's files as a plain folder on this PC, from a game image or a package made with the debug key." },
+];
+const CV_COMPRESSION = [
+  { id: "fast", title: "Fast" }, { id: "balanced", title: "Balanced", rec: true }, { id: "smallest", title: "Smallest" },
+  { id: "stored", title: "Stored", hint: "No compression: the package is the game's size. Try this if a compressed package installs but will not start." },
+];
+const CV_FORMATS = [
+  { id: "ffpkg", title: ".ffpkg (UFS2)", rec: true, body: "What ShadowMount+ recommends for most games." },
+  { id: "exfat", title: ".exfat", body: "For games that only work like content on an external drive." },
+  { id: "ffpfs", title: ".ffpfs (PFS)", exp: true, body: "Experimental in ShadowMount+ 1.7. File names must be plain ASCII; the image's own name is kept to 63 characters." },
+];
+const CV_IMAGE_EXT = /\.(exfat|ffpkg|ufs2|ffpfs|ffpfsc|pkg|fpkg)$/i;
+const CV_MAKE_LABEL = { pkg: "Package", image: "Game image", folder: "Folder", compress: ".ffpfsc" };
+
+function cvDefaults() {
+  const p = (app.settings && app.settings.convert_prefs) || {};
+  return {
+    source: "", info: null, estimates: null, checking: false, error: null,
+    make: p.make || "image", compression: p.compression || "balanced", language: p.language || "",
+    format: p.format || "ffpkg", compress: !!p.compress, lz4: false, lz4_install_runtime: !!p.lz4_install_runtime,
+    lz4_profile: "", verify_chunk_kib: p.verify_chunk_kib || 8192, full_verify: !!p.full_verify,
+    output_dir: (app.settings && app.settings.convert_output) || "", name: "", content_id: "", firmware: "", passcode: "",
+  };
+}
+
+function openConvert(source) {
+  if (!app.cv) app.cv = cvDefaults();
+  if (!$("cv-bg")) {
+    const bg = el("div", { class: "cv-bg", id: "cv-bg" },
+      el("div", { class: "cv" },
+        el("div", { class: "cv-head" },
+          el("h2", {}, "Convert games"),
+          el("small", {}, "Packages, ShadowMount+ game images and folders, with the same options as ps5upload"),
+          el("div", { class: "spacer", style: "flex:1" }),
+          el("button", { onclick: closeConvert }, "Close")),
+        el("div", { class: "cv-body" },
+          el("div", { class: "cv-col", id: "cv-left" }),
+          el("div", { class: "cv-col", id: "cv-right" }))));
+    document.body.append(bg);
+  }
+  if (source) { app.cv.source = source; cvCheck(); }
+  cvRender();
+  pollConvert();
+}
+
+function closeConvert() { const bg = $("cv-bg"); if (bg) bg.remove(); }
+
+async function cvCheck() {
+  const cv = app.cv;
+  if (!cv.source.trim()) { toast("Type or pick a game folder or image first", "err"); return; }
+  Object.assign(cv, { checking: true, info: null, estimates: null, error: null });
+  cvRender();
+  try {
+    cv.info = await api("POST", "/api/convert/inspect", { source: cv.source, output_dir: cv.output_dir });
+    if (!cv.output_dir) cv.output_dir = cv.info.output_dir;
+    if (!cv.info.is_image && cv.make === "folder") cv.make = cv.info.ps5_title ? "image" : "pkg";
+    if (cv.info.is_image && /\.(pkg|fpkg)$/i.test(cv.source) && cv.make !== "folder") cv.make = "folder";
+    cv.firmware = cv.info.min_firmware || "";
+    cv.estimates = "pending";
+    api("POST", "/api/convert/estimate", { source: cv.source, output_dir: cv.output_dir })
+      .then((e) => { if (app.cv === cv) { cv.estimates = e; cvRender(); } })
+      .catch(() => { if (app.cv === cv) { cv.estimates = null; cvRender(); } });
+  } catch (e) { cv.error = e.message; }
+  cv.checking = false;
+  cvRender();
+}
+
+function cvTile(on, onclick, title, body, tags = [], disabled = false) {
+  return el("button", { class: "tile" + (on ? " on" : ""), type: "button", disabled, onclick, "aria-pressed": on ? "true" : "false" },
+    el("b", {}, title, ...tags), body ? el("span", {}, body) : null);
+}
+
+function cvCheckbox(checked, label, hint, onchange, disabled = false) {
+  return el("label", { class: "check" + (disabled ? " disabled" : "") },
+    el("input", { type: "checkbox", checked: checked && !disabled, disabled, onchange: (e) => onchange(e.target.checked) }),
+    el("span", {}, label, hint ? el("small", {}, hint) : null));
+}
+
+function cvInput(key, attrs = {}) {
+  return el("input", { type: "text", spellcheck: "false", value: app.cv[key] || "", ...attrs,
+    oninput: (e) => { app.cv[key] = e.target.value; } });
+}
+
+function cvRender() {
+  const cv = app.cv, left = $("cv-left");
+  if (!left) return;
+  const info = cv.info, set = (patch) => { Object.assign(cv, patch); cvRender(); };
+  const isImageSrc = info ? info.is_image : CV_IMAGE_EXT.test(cv.source);
+
+  // ① Game
+  const pick = () => {
+    const sel = local.selectedPaths();
+    const p = sel.length === 1 ? sel[0] : local.path;
+    if (!p) return toast("Open or select a game folder in the PC pane first", "err");
+    cv.source = p; cvCheck();
+  };
+  const game = el("div", { class: "card" },
+    el("h3", {}, "① Game"),
+    el("div", { class: "hint" }, "A decrypted game folder (with sce_sys/param.json and eboot.bin), a game image (.exfat, .ffpkg, .ffpfs, .ffpfsc) or a package made with the debug key."),
+    el("div", { class: "row-flex" },
+      cvInput("source", { placeholder: "D:\\Games\\PPSA01234  or  …/PPSA01234.exfat",
+        onkeydown: (e) => { if (e.key === "Enter") { cv.source = e.target.value; cvCheck(); } } }),
+      el("button", { onclick: pick, title: "Use the item selected in the PC pane (or the open folder)" }, "Use PC selection"),
+      el("button", { class: "primary", onclick: cvCheck, disabled: cv.checking }, cv.checking ? "Checking…" : "Check")));
+  if (cv.error) game.append(el("div", { class: "err-text" }, cv.error));
+  if (info) {
+    const warns = info.checks.filter((c) => !c.ok).length;
+    game.append(
+      el("dl", { class: "facts small" },
+        el("dt", {}, "Title"), el("dd", {}, info.title || "—"),
+        el("dt", {}, "Content ID"), el("dd", {}, info.content_id || "—"),
+        el("dt", {}, "Files"), el("dd", {}, `${info.files.toLocaleString()} · ${human(info.bytes)}`),
+        el("dt", {}, "Firmware"), el("dd", {}, [info.required_firmware && `declares ${info.required_firmware}`,
+          info.min_firmware && `runs on ${info.min_firmware}+`].filter(Boolean).join(" · ") || "—")),
+      el("details", { open: warns ? true : null },
+        el("summary", {}, warns ? `${warns} warning${warns > 1 ? "s" : ""}, ${info.checks.length - warns} checks passed` : `All ${info.checks.length} checks passed`),
+        el("div", { class: "checks" }, info.checks.map((c) => el("div", { class: c.ok ? "ok" : "bad", title: c.detail }, `${c.name}: ${c.detail}`)))));
+  }
+
+  // ② What to make
+  const recommended = !info ? null : info.ps5_title ? "image" : "pkg";
+  const make = el("div", { class: "card" },
+    el("h3", {}, "② What to make"),
+    el("div", { class: "tiles" }, CV_MAKES.map((m) => {
+      const disabled = (m.id === "folder" && !isImageSrc) || (m.id === "pkg" && isImageSrc && /\.(pkg|fpkg)$/i.test(cv.source));
+      return cvTile(cv.make === m.id, () => set({ make: m.id }), m.title, m.body,
+        recommended === m.id ? [el("span", { class: "tag green" }, "Recommended")] : [], disabled);
+    })),
+    el("div", { class: "hint" }, !info ? "Check a game under ① and the better choice for it is marked."
+      : info.ps5_title ? "This is a PS5 game: as a fake package it installs but will not play above FW 11.60 (you're on 13.60), so make a game image."
+      : "A package is the ordinary choice: it installs and plays like any other game."));
+
+  // ③ Options
+  const opts = el("div", { class: "card" }, el("h3", {}, "③ Options"),
+    el("label", { class: "field" }, el("span", {}, "Output folder"),
+      cvInput("output_dir", { placeholder: "Default: ~/Downloads/fpkgs" })));
+  if (info && info.output_free != null) {
+    const need = Math.ceil((info.planned_size || info.bytes) * 1.02);
+    opts.append(el("div", { class: info.output_free < need ? "warn-text" : "hint" },
+      `Free: ${human(info.output_free)}` + (info.output_free < need ? ` — converting can need up to ${human(need)} there.` : "")));
+  }
+  if (cv.make === "pkg") {
+    const est = cv.estimates;
+    opts.append(el("div", { class: "field" }, el("span", {}, "Compression"),
+      el("div", { class: "tiles" }, CV_COMPRESSION.map((c) => {
+        const e = est && est !== "pending" ? est[c.id] : null;
+        const body = c.hint || (e ? `~${human(e.bytes)} · ~${fmtEta(e.seconds)}` : est === "pending" ? "Estimating…" : "—");
+        return cvTile(cv.compression === c.id, () => set({ compression: c.id }), c.title, body,
+          c.rec ? [el("span", { class: "tag" }, "Recommended")] : []);
+      }))));
+    opts.append(el("label", { class: "field" }, el("span", {}, "Game language"),
+      el("select", { onchange: (e) => { cv.language = e.target.value; } },
+        el("option", { value: "" }, "As the game ships (all languages)"),
+        PLAYGO_LANGUAGES.map(([code, name]) => el("option", { value: code, selected: cv.language === code }, name))),
+      el("div", { class: "hint" }, "Most games follow the console's language. Pick one only for a game that stays in English on a console set to another language; the game has to include that language.")));
+    opts.append(el("details", {}, el("summary", {}, "Package details (content ID, file name, firmware, passcode)"),
+      el("div", { class: "grid2", style: "margin-top:8px" },
+        el("label", { class: "field" }, el("span", {}, "Content ID"), cvInput("content_id", { placeholder: (info && info.content_id) || "from param.json" })),
+        el("label", { class: "field" }, el("span", {}, "File name"), cvInput("name", { placeholder: "the content ID" })),
+        el("label", { class: "field" }, el("span", {}, "Minimum firmware"), cvInput("firmware", { placeholder: "the game's own, e.g. 5.10" })),
+        el("label", { class: "field" }, el("span", {}, "Passcode"), cvInput("passcode", { placeholder: "32 zeros (default)" }))),
+      el("div", { class: "hint" }, "A console older than the package's minimum firmware refuses to install it. It is filled in from the game's modules, so a backport declares the firmware it really runs on.")));
+  } else if (cv.make === "image") {
+    const ready = info && info.ampr_packs;
+    const lz4On = cv.format === "exfat" && cv.lz4;
+    opts.append(el("div", { class: "hint" }, "One file you copy to a PS5 drive, which ShadowMount+ mounts and shows on the home screen. Nothing is installed."),
+      el("div", { class: "tiles" }, CV_FORMATS.map((f) => cvTile(cv.format === f.id, () => set({ format: f.id }), f.title, f.body,
+        [f.rec && el("span", { class: "tag" }, "Recommended"), f.exp && el("span", { class: "tag new" }, "Experimental")].filter(Boolean)))),
+      cvCheckbox(cv.compress, "Compress it into a .ffpfsc",
+        "Usually 40–60% smaller, slower to make, and always mounted read-only. It is compressed as it is written, so only the compressed file is ever on disk.",
+        (v) => set({ compress: v }), lz4On));
+    if (cv.format === "exfat") {
+      const refusal = ready && ready.refusal && !(ready.kind === "runtime" && cv.lz4_install_runtime) ? ready.refusal : null;
+      const noAmpr = !ready || ready.kind === "no_ampr";
+      opts.append(cvCheckbox(cv.lz4, "AMPR LZ4 asset packs (smaller, for ShadowMount+)",
+        "Packs the game's data into LZ4 asset packs that the game's own ampr_emu (fakelib/libSceAmpr.sprx) reads back. Executables, system files and compressed media stay as they are. Plain .exfat only, without .ffpfsc compression.",
+        (v) => set({ lz4: v }), noAmpr || (!!refusal && ready.kind !== "runtime")));
+      if (ready && ready.kind === "runtime") {
+        opts.append(cvCheckbox(cv.lz4_install_runtime, "Put ampr_emu 0.4.2.1 into the image",
+          `${ready.refusal || ""}. The image gets drakmor's ampr_emu 0.4.2.1 as fakelib/libSceAmpr.sprx (downloaded once from its GitHub release and checked against a known digest); the game's own copy stays beside it as libSceAmpr.sprx.orig.`,
+          (v) => set({ lz4_install_runtime: v })));
+      }
+      if (noAmpr) opts.append(el("div", { class: "hint" }, info ? "This game does not read its files through AMPR, so asset packs aren't available. Compress it into a .ffpfsc instead: ShadowMount+ decompresses that for any game." : "Check the game to see whether it can use asset packs."));
+      else if (refusal) opts.append(el("div", { class: "warn-text" }, ready.kind === "runtime" ? `Tick "Put ampr_emu 0.4.2.1 into the image" to use packs: ${refusal}` : `Not available for this game: ${refusal}`));
+      else if (ready.runtime_version) opts.append(el("div", { class: "hint" }, `The game's ampr_emu: ${ready.runtime_version}`));
+      if (lz4On) opts.append(el("label", { class: "field" }, el("span", {}, "LZ4 profile (.toml, optional)"), cvInput("lz4_profile", { placeholder: "built-in profile" })));
+    }
+    opts.append(el("label", { class: "field" }, el("span", {}, "Read-back check, per read"),
+      el("select", { onchange: (e) => { cv.verify_chunk_kib = Number(e.target.value); } },
+        [1024, 4096, 8192, 16384, 32768].map((k) => el("option", { value: k, selected: cv.verify_chunk_kib === k }, `${k / 1024} MiB${k === 8192 ? " (default)" : ""}`))),
+      el("div", { class: "hint" }, "After writing, the image is read back and checked. 8 MiB was fastest in measurement; the check itself is the same at any size.")));
+  } else {
+    opts.append(el("div", { class: "hint" }, "The folder is named after the image or package, in the output folder. Nothing is compressed, and nothing reaches the PS5."),
+      el("label", { class: "field" }, el("span", {}, "Folder name"), cvInput("name", { placeholder: "the source's name" })));
+  }
+  opts.append(cvCheckbox(cv.full_verify, "Full verification", "Re-reads every byte of the output to check it. Takes longer; off, the structure and sizes are checked in full and a sample of the data.", (v) => { cv.full_verify = v; }));
+
+  left.replaceChildren(game, make, opts);
+  cvRenderQueue();
+}
+
+function cvOptions() {
+  const cv = app.cv;
+  const req = { make: cv.make, source: cv.source.trim(), output_dir: cv.output_dir.trim(), full_verify: cv.full_verify };
+  if (cv.make === "pkg") Object.assign(req, { compression: cv.compression, language: cv.language, content_id: cv.content_id, name: cv.name, firmware: cv.firmware, passcode: cv.passcode });
+  else if (cv.make === "image") {
+    const lz4 = cv.format === "exfat" && cv.lz4;
+    Object.assign(req, { format: cv.format, compress: !lz4 && cv.compress, lz4, verify_chunk_kib: cv.verify_chunk_kib });
+    if (lz4) Object.assign(req, { lz4_install_runtime: cv.lz4_install_runtime, lz4_profile: cv.lz4_profile });
+  } else req.name = cv.name;
+  return req;
+}
+
+async function cvStart() {
+  try {
+    const job = await api("POST", "/api/convert/start", cvOptions());
+    app.settings = (await api("GET", "/api/state")).settings;
+    toast(job.state === "queued" && app.cvJobs.some((j) => j.state === "running") ? "Added to the queue" : "Converting…", "ok");
+    pollConvert();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function cvSend(j) {
+  const def = j.make === "pkg" ? "/user/data/ps5upload/pkg_library" : "/data/homebrew";
+  const dest = await modal({ title: "Send to the PS5", input: remote.path && remote.path !== "/" ? remote.path : def, okText: "Send",
+    text: j.make === "pkg" ? "Copies the package to this PS5 folder. Install it afterwards with etaHEN's package installer or ps5upload."
+      : "Copies it to this PS5 folder. ShadowMount+ mounts game images from /data/homebrew (and the other folders under Game folders)." });
+  if (!dest) return;
+  try {
+    await api("POST", "/api/remote/mkdir", { path: dest }).catch(() => {});
+    await api("POST", "/api/convert/send", { id: j.id, dest });
+    $("transfers").classList.remove("collapsed");
+    toast("Sending to the PS5 — see Transfers", "ok");
+    pollJobs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function cvRenderQueue() {
+  const right = $("cv-right");
+  if (!right) return;
+  const cv = app.cv, jobs = app.cvJobs || [];
+  const running = jobs.some((j) => j.state === "running");
+  const startLabel = { pkg: "Make package", image: "Make game image", folder: "Make folder" }[cv.make];
+  const run = el("div", { class: "card" }, el("h3", {}, "④ Run"),
+    el("div", { class: "row-flex" },
+      el("button", { class: "primary", onclick: cvStart, disabled: !cv.source.trim() }, running ? `Add to queue: ${startLabel}` : startLabel),
+      el("button", { class: "ghost", onclick: async () => { app.cvJobs = (await api("POST", "/api/convert/clear", {})).jobs; cvRenderQueue(); } }, "Clear finished")),
+    app.cvConverter === "" ? el("div", { class: "err-text" }, "The converter (ps5cable-convert) is missing next to the app, so nothing can be converted.") : null,
+    el("div", { class: "hint" }, "Conversions run one at a time on this PC; the PS5 doesn't need to be connected until you send the result."));
+  const list = jobs.map((j) => {
+    const name = (j.source || "").split(/[\\/]/).filter(Boolean).pop();
+    const what = CV_MAKE_LABEL[j.make] + (j.make === "image" ? ` .${j.options.compress ? "ffpfsc" : j.options.format}${j.options.lz4 ? " + LZ4" : ""}` : j.make === "pkg" ? ` · ${j.options.compression}` : "");
+    const pct = j.state === "done" ? 100 : j.percent || 0;
+    const status = { queued: "Queued", running: `${j.stage_label || "Starting"}… ${j.total ? `${human(j.done)} of ${human(j.total)}` : ""}`, done: "Done", failed: "Failed", cancelled: "Cancelled" }[j.state];
+    const box = el("div", { class: "cvjob " + j.state },
+      el("div", { class: "top" }, el("b", { title: j.source }, name), el("span", { class: "tag" + (j.state === "done" ? " green" : "") }, what),
+        ["queued", "running"].includes(j.state) ? el("button", { class: "ghost", onclick: () => api("POST", "/api/convert/cancel", { id: j.id }).then(pollConvert).catch((e) => toast(e.message, "err")) }, "Cancel") : null),
+      el("div", { class: "bar" }, el("i", { style: `width:${pct.toFixed(1)}%` })),
+      el("small", {}, status + (j.stage_count && j.state === "running" ? ` · step ${j.stage_index + 1} of ${j.stage_count}` : "")));
+    if (j.state === "done" && j.result) {
+      const r = j.result;
+      box.append(el("code", {}, r.path), el("small", {}, `${human(r.size)} · ${r.files != null ? r.files + " files · " : ""}${fmtEta((r.elapsed_ms || 0) / 1000)}${r.detail ? " · " + r.detail : ""}`));
+      if (r.warnings && r.warnings.length) box.append(el("small", { class: "warn-text" }, r.warnings.join(" · ")));
+      box.append(el("div", { class: "row-flex" },
+        el("button", { onclick: () => api("POST", "/api/local/open", { path: r.path.replace(/[\\/][^\\/]+$/, "") }).catch((e) => toast(e.message, "err")) }, "Show in folder"),
+        el("button", { class: "primary", disabled: !app.connected, title: app.connected ? "" : "Connect to the PS5 first", onclick: () => cvSend(j) }, "Send to PS5")));
+    }
+    if (j.state === "failed") {
+      const hint = /already exists/i.test(j.error || "") ? " — delete or rename it, or pick another output folder." : "";
+      box.append(el("small", { class: "err-text" }, j.error + hint));
+    }
+    return box;
+  });
+  right.replaceChildren(run, ...list);
+}
+
+let cvTimer = null;
+async function pollConvert() {
+  clearTimeout(cvTimer);
+  try {
+    const d = await api("GET", "/api/convert/jobs");
+    const before = new Map((app.cvJobs || []).map((j) => [j.id, j.state]));
+    app.cvJobs = d.jobs; app.cvConverter = d.converter;
+    for (const j of d.jobs) {
+      const was = before.get(j.id);
+      if (was && was !== j.state && j.state === "done") toast(`Converted: ${j.result.path}`, "ok");
+      if (was && was !== j.state && j.state === "failed") toast(`Conversion failed: ${j.error}`, "err");
+    }
+    cvRenderQueue();
+    const active = d.jobs.some((j) => ["queued", "running"].includes(j.state));
+    $("btn-convert").classList.toggle("busy", active);
+    if (active || $("cv-bg")) cvTimer = setTimeout(pollConvert, active ? 700 : 3000);
+  } catch (e) { cvTimer = setTimeout(pollConvert, 3000); }
+}
+
 // ---------------------------------------------------------------- transfers
 
 async function startTransfer(direction) {
@@ -1056,6 +1415,8 @@ async function boot() {
 $("btn-connect").addEventListener("click", () => connect($("host").value.trim()));
 $("host").addEventListener("keydown", (e) => { if (e.key === "Enter") connect($("host").value.trim()); });
 $("btn-find").addEventListener("click", findPs5);
+$("btn-convert").addEventListener("click", () => openConvert());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("cv-bg") && !document.querySelector(".modal-bg")) closeConvert(); });
 $("cable").addEventListener("click", openCablePanel);
 $("btn-payload").addEventListener("click", sendPayload);
 $("btn-upload").addEventListener("click", () => startTransfer("upload"));
