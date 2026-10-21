@@ -4,6 +4,7 @@ Run with: python3 -m unittest discover -s tests -v"""
 
 import contextlib
 import io
+import os
 import random
 import shutil
 import sys
@@ -231,7 +232,8 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("PS5 CONNECTED over USB", out)
         self.assertIn("Fake cable", out)
-        self.assertIn("/data:", out)
+        if os.path.isdir("/data"):  # the desktop payload reports the host's /data
+            self.assertIn("/data:", out)
         self.assertIn("USB-A ⇄ USB-C", out)
 
     def test_large_file_crosses_many_frames(self):
