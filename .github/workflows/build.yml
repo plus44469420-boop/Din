@@ -56,8 +56,8 @@ jobs:
           d=out/ps5cable-linux-x64
           mkdir -p "$d"
           cp payload/ps5cable.elf converter/target/release/ps5cable-convert \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html \
-             pc/setup-direct-link-unix.sh README.md LICENSE "$d/"
+             pc/ps5cable.py pc/usblink.py pc/convert.py pc/hub.py pc/hub_ui.html \
+             pc/requirements.txt pc/60-ps5cable.rules README.md LICENSE "$d/"
           tar -C out -czf out/ps5cable-linux-x64.tar.gz ps5cable-linux-x64
 
       - uses: actions/upload-artifact@v4
@@ -90,8 +90,8 @@ jobs:
           d=out/ps5cable-macos-arm64
           mkdir -p "$d"
           cp payload/ps5cable.elf converter/target/release/ps5cable-convert \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html \
-             pc/setup-direct-link-unix.sh README.md LICENSE "$d/"
+             pc/ps5cable.py pc/usblink.py pc/convert.py pc/hub.py pc/hub_ui.html \
+             pc/requirements.txt pc/60-ps5cable.rules README.md LICENSE "$d/"
           tar -C out -czf out/ps5cable-macos-arm64.tar.gz ps5cable-macos-arm64
 
       - uses: actions/upload-artifact@v4
@@ -126,11 +126,12 @@ jobs:
       - name: Build ps5cable-hub.exe and ps5cable.exe
         shell: bash
         run: |
-          pip install pyinstaller
-          pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
+          pip install pyinstaller -r pc/requirements.txt
+          usb="--collect-all libusb_package --hidden-import usb.backend.libusb1"
+          pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc $usb \
             --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." \
             --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
-          pyinstaller --onefile --console --name ps5cable --paths pc pc/ps5cable.py
+          pyinstaller --onefile --console --name ps5cable --paths pc $usb pc/ps5cable.py
 
       - name: Smoke test the hub executable
         shell: bash
@@ -140,6 +141,14 @@ jobs:
           url=$(grep -o 'http[^ ]*' hub.log)
           curl -sf "$url" | grep -q "ps5cable Hub"
           curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state | grep -q ps5cable.elf
+          # No cable on the runner: libusb loaded and found nothing, rather than "USB support missing".
+          for i in $(seq 1 10); do
+            state=$(curl -sf -H "X-Hub-Token: ${url##*t=}" -X POST -d '{}' http://127.0.0.1:8799/api/refresh)
+            echo "$state" | grep -q '"state": "no_cable"' && break
+            sleep 1
+          done
+          echo "$state"
+          echo "$state" | grep -q '"state": "no_cable"'
           curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/convert/jobs | grep -q ps5cable-convert.exe
           taskkill //F //IM ps5cable-hub.exe || true
 
@@ -149,9 +158,8 @@ jobs:
           mkdir -p out/ps5cable
           cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
              converter/target/release/ps5cable-convert.exe \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
-             pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
-             README.md LICENSE out/ps5cable/
+             pc/ps5cable.py pc/usblink.py pc/convert.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
+             pc/requirements.txt README.md LICENSE out/ps5cable/
           (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)
 
       - uses: actions/upload-artifact@v4
