@@ -13,7 +13,7 @@ File transfer between a PC and a jailbroken PS5 over **one USB cable**: a USB br
 ## Quick start
 
 1. Get a **USB 3 bridge cable with the PL27A1 chip**, with whichever ends suit your PC (USB-C or USB-A). A plain USB cable can't work: the PC and the PS5 are both USB hosts.
-2. **Windows only, once:** plug the cable into the PC, run [Zadig](https://zadig.akeo.ie/), pick the Prolific device **067B 27A1** and install **WinUSB**.
+2. **Windows only, once:** plug the cable into the PC, click **Install driver** in the app and OK the Windows admin prompt. No Zadig needed.
 3. Copy `ps5cable.elf` to the PS5 (USB stick + File Manager) and load it with your jailbreak's payload loader, or add it to your autoloader.
 4. Plug the cable into the PS5 (rear USB-A, or the SuperSpeed front USB-C) and into a USB 3 port on the PC (USB-C, or a blue USB-A port), and start **ps5cable Hub**. The light turns green: **PS5 Connected**.
 

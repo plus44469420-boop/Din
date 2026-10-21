@@ -123,6 +123,13 @@ class HubTest(unittest.TestCase):
         self.assertEqual([d["name"] for d in r["usb"]["devices"] if d["bridge"]],
                          ["Fake cable (test)"])
 
+    @unittest.skipIf(os.name == "nt", "would really install the driver")
+    def test_driver_install_is_windows_only(self):
+        self.assertFalse(self.api("GET", "/api/state")["can_install_driver"])
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.api("POST", "/api/usb/install-driver", {})
+        self.assertEqual(cm.exception.code, 400)
+
     def test_network_endpoints_are_gone(self):
         for path in ("/api/connect", "/api/discover", "/api/send-payload"):
             with self.assertRaises(urllib.error.HTTPError) as cm:

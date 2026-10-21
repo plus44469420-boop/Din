@@ -58,7 +58,7 @@ You can also build everything yourself, as described in Building below.
 
 ### 2. PC: let the app open the cable
 
-- **Windows:** the cable needs the generic **WinUSB** driver, installed once. Plug the cable into the PC, run [Zadig](https://zadig.akeo.ie/), choose **Options → List All Devices**, pick the Prolific device with USB ID **067B 27A1** (interface 0 if there are several), select **WinUSB** and click **Replace Driver**. If the cable came with transfer software that installed its own driver, Zadig replaces it. If Zadig doesn't list 067B 27A1, the cable is probably showing its built-in "transfer software" drive instead: some cables have a mode switch, or need that software ejected first.
+- **Windows:** the cable needs Windows' own **WinUSB** driver, once, and the app installs it: plug the cable into the PC, click **Install driver** on the PS5 side of the app, and OK the Windows admin prompt. No Zadig needed. The app does what Zadig does: it writes a small driver file that points the cable (USB ID 067B 27A1 or 067B 25A1) at WinUSB, which is part of Windows; signs it with a certificate made on your PC just for this, whose private key is deleted straight after so it can't sign anything else; and puts it on the cable, replacing any driver that came with the cable's transfer software. **Rescan USB** lists every USB device the PC sees, so you can check the cable shows up. If it doesn't, the cable may be showing its built-in "transfer software" drive instead: some cables have a mode switch, or need that software ejected first.
 - **Linux:** run `sudo cp pc/60-ps5cable.rules /etc/udev/rules.d/ && sudo udevadm control --reload`, then replug the cable. The app detaches the kernel's `plusb` network driver from the cable by itself.
 - **macOS:** nothing to install.
 
@@ -76,7 +76,7 @@ Then plug the cable into the PS5. The payload finds it within a second, and the 
 
 1. Run your jailbreak and load the payload (setup step 3).
 2. Double-click **`ps5cable-hub.exe`**. To run from source instead, use `pc\start-hub.bat`, or `python pc/hub.py` on macOS or Linux. It opens in its own window.
-3. Plug in the USB cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over USB. Amber means the cable is there but the PS5 isn't answering yet (payload not running, or the other end not plugged in) or that Windows still needs the WinUSB driver; red means no cable is plugged into the PC. While it's not connected, the PS5 pane lists the steps still missing.
+3. Plug in the USB cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over USB. Amber means the cable is there but the PS5 isn't answering yet (payload not running, or the other end not plugged in) or that Windows still needs the USB driver; red means no cable is plugged into the PC. While it's not connected, the PS5 pane lists the steps still missing, with **Rescan USB** (look again now and list the PC's USB devices) and, on Windows, **Install driver**.
    - Next to it, the **cable pill** shows the bridge chip and the USB speed your PC's port negotiated, e.g. *Prolific PL27A1 · USB 3.2 Gen 1 — Max ~250 MB/s*. It turns amber when something limits the link (a USB 2.0 port or a USB 2.0 bridge). Click it for the details and a **Run speed test** button.
 4. Pick what to send:
    - The **left pane is your PC**. Use the shortcut chips for Home, Desktop, Downloads and each drive letter, double-click folders to open them, and tick the files and folders you want. Shift-click selects a range, and Ctrl-click adds single items.
@@ -210,8 +210,8 @@ Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publ
 
 ## Troubleshooting
 
-- **"No USB bridge cable found".** The PC doesn't see a PL27A1/PL25A1 cable. Try another port, and on Windows check Device Manager for the Prolific device. A plain USB-C or USB-A cable doesn't show up at all (see "The cable" above).
-- **"Cable needs a driver" (Windows).** Install WinUSB on the cable with Zadig (setup step 2).
+- **"No USB bridge cable found".** The PC doesn't see a PL27A1/PL25A1 cable. Click **Rescan USB** to list every USB device the PC sees; if the cable isn't among them, try another port. A plain USB-C or USB-A cable doesn't show up at all (see "The cable" above).
+- **"Cable needs a driver" (Windows).** Click **Install driver** and OK the admin prompt (setup step 2). If Windows asks for a restart afterwards, restart.
 - **"No permission to open the cable" (Linux).** Install the udev rule (setup step 2) and replug, or run as root.
 - **"USB cable found", but it never turns green.** The PS5 isn't answering: load `ps5cable.elf` on the PS5, check the cable is in the PS5, and watch the PS5's notifications. Unplugging and replugging the PS5 end makes the payload look for the cable again.
 - **About 35 MB/s.** One end is on USB 2.0. Move the PS5 end to a rear USB-A port or the SuperSpeed front USB-C port, and plug the PC end straight into a USB-C port or a blue USB 3 USB-A port. The cable panel's port table lists the right ports for each cable type.

@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import convert  # noqa: E402
 import ps5cable  # noqa: E402
 import usblink  # noqa: E402
+import windriver  # noqa: E402
 
 APP_NAME = "ps5cable Hub"
 SETTINGS_PATH = Path.home() / ".ps5cable-hub.json"
@@ -163,6 +164,7 @@ class Hub:
         self.status_cache = None
         self.places_cache = None
         self.speedtest_lock = threading.Lock()
+        self.driver_lock = threading.Lock()
         self.last_speedtest = None
         self.converter = convert.Converter()
 
@@ -619,6 +621,7 @@ def api_state(hub, args):
     return {"app": APP_NAME, "settings": hub.settings.snapshot(),
             "status": hub.status(), "payload": str(find_payload() or ""),
             "local_places": local_places(), "os": os.name,
+            "can_install_driver": windriver.supported(),
             "usb_guide": {"cable_types": usblink.CABLE_TYPES, "pc_port_tip": usblink.PC_PORT_TIP,
                           "ps5_port_tip": usblink.PS5_PORT_TIP}}
 
@@ -641,6 +644,22 @@ def api_usb_rescan(hub, args):
     """Tries the cable again right away and lists every USB device the PC sees."""
     hub.link.rescan(wait=1.5)
     return {"status": hub.refresh_status(), "usb": hub.link.scan_devices()}
+
+
+def api_usb_install_driver(hub, args):
+    """Windows: puts WinUSB on the cable (one UAC prompt), then looks for it again."""
+    if not windriver.supported():
+        raise ApiError("Only Windows needs a driver for the cable.")
+    if not hub.driver_lock.acquire(blocking=False):
+        raise ApiError("The driver is already being installed.", HTTPStatus.CONFLICT)
+    try:
+        result = windriver.install_elevated()
+    except windriver.DriverError as e:
+        raise ApiError(str(e))
+    finally:
+        hub.driver_lock.release()
+    hub.link.rescan(wait=3)
+    return {"result": result, "status": hub.refresh_status(), "usb": hub.link.scan_devices()}
 
 
 def api_remote_places(hub, args):
@@ -895,6 +914,7 @@ ROUTES = {
     ("POST", "/api/settings"): api_settings,
     ("POST", "/api/refresh"): api_refresh,
     ("POST", "/api/usb/rescan"): api_usb_rescan,
+    ("POST", "/api/usb/install-driver"): api_usb_install_driver,
     ("GET", "/api/link"): api_link,
     ("POST", "/api/speedtest"): api_speedtest,
     ("GET", "/api/convert/jobs"): api_convert_jobs,
@@ -960,7 +980,11 @@ def main(argv=None):
     p.add_argument("--stay", action="store_true",
                    help="keep running after the window is closed")
     p.add_argument("--settings", type=Path, default=SETTINGS_PATH)
+    p.add_argument("--install-driver", metavar="RESULT_JSON", nargs="?", const="",
+                   help="Windows, as administrator: install the cable's USB driver and exit")
     args = p.parse_args(argv)
+    if args.install_driver is not None:
+        sys.exit(windriver.run_elevated_child(args.install_driver))
 
     hub = Hub(Settings(args.settings))
     token = secrets.token_urlsafe(24)

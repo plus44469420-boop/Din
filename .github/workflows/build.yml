@@ -155,6 +155,19 @@ jobs:
           grep -q ps5cable-convert.exe <<<"$jobs"
           taskkill //F //IM ps5cable-hub.exe || true
 
+      # The runner is an administrator, so this is the elevated half of the
+      # app's Install driver button: Windows must accept the self-signed package.
+      - name: Install the cable's USB driver
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\ps5cable-hub.exe -Wait -PassThru `
+            -ArgumentList '--install-driver', "$PWD\driver.json"
+          Get-Content driver.json
+          if ($p.ExitCode -ne 0) { exit 1 }
+          $listed = pnputil /enum-drivers | Select-String -Context 0,6 'ps5cable.inf'
+          $listed
+          if (-not ($listed | Out-String).Contains('PS5 Cable')) { exit 1 }
+
       - name: Package
         shell: bash
         run: |
