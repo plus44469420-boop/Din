@@ -116,6 +116,13 @@ class HubTest(unittest.TestCase):
         self.assertIn("blue", guide["pc_port_tip"])
         self.assertIn("rear USB-A", guide["ps5_port_tip"])
 
+    def test_usb_rescan_lists_devices(self):
+        r = self.api("POST", "/api/usb/rescan", {})
+        self.assertTrue(r["status"]["connected"])
+        self.assertIsNone(r["usb"]["error"])
+        self.assertEqual([d["name"] for d in r["usb"]["devices"] if d["bridge"]],
+                         ["Fake cable (test)"])
+
     def test_network_endpoints_are_gone(self):
         for path in ("/api/connect", "/api/discover", "/api/send-payload"):
             with self.assertRaises(urllib.error.HTTPError) as cm:

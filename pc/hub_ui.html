@@ -265,6 +265,17 @@
   table.ctypes th, table.ctypes td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: top; }
   table.ctypes th { color: var(--muted); font-weight: 600; border-top: none; }
   table.ctypes td:first-child { white-space: nowrap; font-weight: 600; }
+  .usblist { width: 100%; text-align: left; display: grid; gap: 6px; font-size: 12.5px; }
+  .usblist .head { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
+  .usblist .head small { color: var(--muted); }
+  .usblist ul { list-style: none; margin: 0; padding: 0; max-height: 170px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .usblist li { display: grid; padding: 6px 10px; border-top: 1px solid #161d2a; }
+  .usblist li:first-child { border-top: none; }
+  .usblist li b { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .usblist li small { color: var(--muted); font-size: 11.5px; }
+  .usblist li.bridge { background: #0f2b1a; } .usblist li.bridge b { color: #86efac; }
+  .usblist p { margin: 0; }
+  .usblist .warn-text, .usblist.err-text { font-size: 12px; } .usblist .warn-text { color: #fcd34d; } .usblist.err-text { color: #fca5a5; }
   .guide { text-align: left; display: grid; gap: 8px; }
   .guide p { margin: 0; color: var(--muted); font-size: 12.5px; }
   .steps li.done .tick { background: var(--ok); border-color: var(--ok); color: #052e14; font-weight: 800; }
@@ -925,7 +936,7 @@ let dragSide = null;
 
 function disconnectedCard() {
   const st = app.status || { state: "starting" };
-  const plugged = ["no_access", "waiting", "connected"].includes(st.state);
+  const plugged = ["no_access", "no_driver", "waiting", "connected"].includes(st.state);
   const opened = ["waiting", "connected"].includes(st.state);
   const step = (done, active, ...text) => el("li", { class: done ? "done" : active ? "active" : "" },
     el("span", { class: "tick" }, done ? "✓" : ""), el("span", {}, ...text));
@@ -935,15 +946,51 @@ function disconnectedCard() {
     el("h3", {}, opened ? "USB cable found" : "PS5 not connected"),
     el("ol", { class: "steps" },
       step(plugged, !plugged, "USB bridge (data link) cable plugged into this PC, with a USB-C or USB-A end"),
-      step(opened, st.state === "no_access",
-        app.os === "nt" ? "WinUSB driver installed on the cable (Zadig, once)" : "Cable can be opened by this app"),
+      step(opened, ["no_access", "no_driver"].includes(st.state),
+        app.os === "nt" ? "USB driver installed on the cable (once)" : "Cable can be opened by this app"),
       step(false, opened, "Other end in a PS5 USB port, with the ps5cable payload running (load ",
         elf, " with your jailbreak)")),
     el("div", { style: "display:flex; gap:8px" },
-      el("button", { class: "primary", onclick: checkAgain }, "Check again")),
+      el("button", { class: "primary", title: "Look for the cable again and list every USB device on this PC",
+                     onclick: (e) => rescanUsb(e.currentTarget) },
+        el("span", { html: ICONS.refresh, style: "display:contents" }), "Rescan USB")),
     el("small", { style: "color:#6b7689; max-width: 420px" }, st.detail || linkSubtitle(st)),
+    usbDeviceList(),
     el("details", {}, el("summary", {}, "USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A: which ports?"),
       cableGuide())));
+}
+
+function usbDeviceList() {
+  const s = app.usbScan;
+  if (!s) return null;
+  if (s.error) return el("div", { class: "usblist err-text" }, s.error);
+  const n = s.devices.length;
+  return el("div", { class: "usblist" },
+    el("div", { class: "head" }, el("b", {}, `${n} USB device${n === 1 ? "" : "s"} on this PC`),
+      el("small", {}, "scanned " + new Date(s.at).toLocaleTimeString())),
+    n ? el("ul", {}, s.devices.map((d) => el("li", { class: d.bridge ? "bridge" : "" },
+      el("b", {}, d.name), el("small", {}, [d.kind, d.speed, d.id].filter(Boolean).join(" · ")))))
+      : el("p", {}, "No USB devices found."),
+    !s.devices.some((d) => d.bridge)
+      ? el("p", { class: "warn-text" }, "No USB bridge cable among them. A plain USB cable never shows up here: " +
+          "it needs a bridge chip such as the Prolific PL27A1. Check that the cable is pushed fully into this PC.")
+      : null);
+}
+
+async function rescanUsb(btn) {
+  if (btn) { btn.disabled = true; btn.lastChild.textContent = "Scanning…"; }
+  try {
+    const r = await api("POST", "/api/usb/rescan", {});
+    app.usbScan = { ...r.usb, at: Date.now() };
+    applyStatus(r.status);
+    if (!app.connected) remote.renderList();
+    const bridge = r.usb.devices.some((d) => d.bridge);
+    toast(r.status.connected ? "PS5 connected over USB" : bridge ? "Found the USB bridge cable" : "No USB bridge cable found",
+          r.status.connected || bridge ? "ok" : "err");
+  } catch (e) {
+    toast(e.message, "err");
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.lastChild.textContent = "Rescan USB"; }
+  }
 }
 
 function cableGuide() {
@@ -981,7 +1028,8 @@ function updateRail() {
 const LINK_TEXT = {
   connected: ["PS5 Connected", "ok"],
   waiting: ["USB cable found", "warn"],
-  no_access: ["Cable needs a driver", "warn"],
+  no_access: ["Cable can't be opened", "warn"],
+  no_driver: ["Cable needs a driver", "warn"],
   no_backend: ["USB support missing", "warn"],
   no_cable: ["PS5 not connected", ""],
   starting: ["PS5 not connected", ""],
@@ -994,7 +1042,8 @@ function linkSubtitle(st) {
       return "Connected over USB" + usb;
     }
     case "waiting": return "Waiting for the ps5cable payload on the PS5";
-    case "no_access": return app.os === "nt" ? "Install the WinUSB driver with Zadig" : "No permission to open the cable";
+    case "no_driver": return "Click Install driver (once)";
+    case "no_access": return app.os === "nt" ? "Another program may be using the cable" : "No permission to open the cable";
     case "no_backend": return "Install pyusb and libusb";
     case "starting": return "Looking for the USB cable…";
     default: return "Plug in the USB bridge cable (USB-C or USB-A)";

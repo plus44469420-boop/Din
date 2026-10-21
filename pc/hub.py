@@ -218,7 +218,8 @@ class Hub:
                     self.status_cache = st
             # Wakes up early when the cable or payload comes or goes.
             if st.get("connected"):
-                self.link.wait(3, states=("no_cable", "no_access", "no_backend", "waiting"))
+                self.link.wait(3, states=("no_cable", "no_access", "no_driver", "no_backend",
+                                          "waiting"))
             else:
                 self.link.wait(1)
 
@@ -636,6 +637,12 @@ def api_refresh(hub, args):
     return hub.refresh_status()
 
 
+def api_usb_rescan(hub, args):
+    """Tries the cable again right away and lists every USB device the PC sees."""
+    hub.link.rescan(wait=1.5)
+    return {"status": hub.refresh_status(), "usb": hub.link.scan_devices()}
+
+
 def api_remote_places(hub, args):
     if not hub.status().get("connected"):
         raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
@@ -887,6 +894,7 @@ ROUTES = {
     ("GET", "/api/remote/places"): api_remote_places,
     ("POST", "/api/settings"): api_settings,
     ("POST", "/api/refresh"): api_refresh,
+    ("POST", "/api/usb/rescan"): api_usb_rescan,
     ("GET", "/api/link"): api_link,
     ("POST", "/api/speedtest"): api_speedtest,
     ("GET", "/api/convert/jobs"): api_convert_jobs,

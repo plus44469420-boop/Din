@@ -100,16 +100,44 @@ class NoAccess(Exception):
     """A bridge cable is there but cannot be opened (driver or permissions)."""
 
 
+class NoDriver(NoAccess):
+    """Windows: the cable is there but not on the WinUSB driver yet."""
+
+
 class NoBackend(Exception):
     """pyusb or libusb is missing."""
+
+
+# Interface classes, for naming devices that don't say what they are.
+USB_CLASS_NAMES = {
+    0x01: "Audio", 0x02: "Network / serial", 0x03: "Keyboard, mouse or controller",
+    0x05: "Physical", 0x06: "Camera (still image)", 0x07: "Printer", 0x08: "USB drive",
+    0x0A: "Network / serial", 0x0B: "Smart card reader", 0x0E: "Webcam",
+    0x0F: "Health device", 0x10: "Audio / video", 0x11: "USB-C billboard",
+    0xE0: "Bluetooth / wireless", 0xEF: "Multi-function", 0xFE: "Firmware update",
+    0xFF: "Vendor-specific",
+}
+HUB_CLASS = 0x09
+
+
+def describe_device(vid, pid, name=None, classes=(), speed=None):
+    """One row of the USB device list."""
+    bridge = BRIDGES.get((vid, pid))
+    kind = ("USB bridge cable (works with PS5 Cable)" if bridge else
+            " / ".join(dict.fromkeys(USB_CLASS_NAMES.get(c, "Other") for c in classes))
+            or "USB device")
+    mbps = USB_SPEED_MBPS.get(speed)
+    return {"id": f"{vid:04x}:{pid:04x}", "name": name or (bridge[0] if bridge else kind),
+            "kind": kind, "bridge": bool(bridge),
+            "speed": USB_SPEED_LABEL.get(mbps, "").split(" (")[0] or None}
 
 
 # --- transports -------------------------------------------------------------
 
 def _access_hint():
     if os.name == "nt":
-        return ("Windows needs the WinUSB driver on the cable: run Zadig, pick the "
-                "Prolific device and install WinUSB (see the README).")
+        return ("Windows needs the WinUSB driver on the cable: click Install driver "
+                "in PS5 Cable (one admin prompt).")
     if sys.platform == "darwin":
         return "Unplug the cable, close any transfer app that came with it, and plug it back in."
     return ("No permission to open the cable. Install pc/60-ps5cable.rules into "
@@ -139,13 +167,46 @@ class PyUsbBackend:
         self._usb = (usb.core, usb.util, backend)
         return self._usb
 
-    def open(self):
-        core, util, backend = self._load()
+    def _find(self, **kw):
+        core, _, backend = self._load()
         try:
-            devs = list(core.find(find_all=True, backend=backend,
-                                  custom_match=lambda d: (d.idVendor, d.idProduct) in BRIDGES))
+            return list(core.find(find_all=True, backend=backend, **kw))
         except core.NoBackendError:
             raise NoBackend("libusb was not found. Run: pip install libusb-package")
+
+    def scan(self, name_budget=2.0):
+        """Every USB device this PC sees (hubs left out), bridge cables first."""
+        _, util, _ = self._load()
+        deadline = time.monotonic() + name_budget
+        out = []
+        for d in self._find():
+            if d.bDeviceClass == HUB_CLASS:
+                continue
+            classes = [d.bDeviceClass] if d.bDeviceClass else []
+            try:
+                classes += [i.bInterfaceClass for cfg in d for i in cfg]
+            except Exception:
+                pass
+            name = None
+            # Reading the name opens the device: never the cable, which the
+            # tunnel may hold, and only while there's time left.
+            if (d.idVendor, d.idProduct) not in BRIDGES and d.iProduct and \
+                    time.monotonic() < deadline:
+                try:
+                    name = util.get_string(d, d.iProduct)
+                except Exception:
+                    pass
+                finally:
+                    util.dispose_resources(d)
+            if HUB_CLASS in classes:
+                continue
+            out.append(describe_device(d.idVendor, d.idProduct, name, classes,
+                                       getattr(d, "speed", None)))
+        return sorted(out, key=lambda r: not r["bridge"])
+
+    def open(self):
+        core, util, backend = self._load()
+        devs = self._find(custom_match=lambda d: (d.idVendor, d.idProduct) in BRIDGES)
         if not devs:
             raise NoDevice("No USB bridge cable found.")
         dev = devs[0]
@@ -165,6 +226,11 @@ class PyUsbBackend:
             util.claim_interface(dev, 0)
         except (core.USBError, NotImplementedError) as e:
             util.dispose_resources(dev)
+            # libusb's "not supported" on Windows: the device isn't on WinUSB.
+            if os.name == "nt" and (isinstance(e, NotImplementedError)
+                                    or getattr(e, "backend_error_code", None) == -12):
+                raise NoDriver(f"Found a {chip} cable, but it needs the USB driver. "
+                               f"{_access_hint()}")
             raise NoAccess(f"Found a {chip} cable but could not open it ({e}). {_access_hint()}")
 
         def bulk(direction):
@@ -246,6 +312,10 @@ class FakeCableBackend:
         sock, _ = self.srv.accept()
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return FakeCableTransport(sock)
+
+    def scan(self):
+        return [describe_device(0, 0, "Fake cable (test)") | {"id": None, "bridge": True,
+                                                              "kind": "USB bridge cable (test)"}]
 
     def close(self):
         self.srv.close()
@@ -369,6 +439,7 @@ STATE_TEXT = {
     "no_cable": "No USB bridge cable found. Plug a USB bridge (data link) cable "
                 "between this PC and the PS5: USB-C or USB-A ends both work.",
     "no_access": "The USB bridge cable cannot be opened.",
+    "no_driver": "The USB bridge cable needs the USB driver: click Install driver.",
     "waiting": "Bridge cable found. Waiting for the ps5cable payload on the PS5; "
                "load ps5cable.elf with the jailbreak.",
     "connected": "PS5 connected over USB.",
@@ -401,6 +472,8 @@ class Tunnel:
         self.chans = {}
         self.next_id = 1
         self.changed = threading.Condition()
+        self._wake = threading.Event()
+        self.updates = 0
         self.started = False
         self.stopped = False
 
@@ -413,8 +486,39 @@ class Tunnel:
             threading.Thread(target=self._accept, daemon=True, name="usb-accept").start()
         return self
 
+    def rescan(self, wait=0.0):
+        """Looks for the cable (or greets the PS5) again now instead of on the next
+        retry, and waits up to `wait` seconds for the outcome."""
+        with self.changed:
+            seen = self.updates
+        self._wake.set()
+        deadline = time.monotonic() + wait
+        with self.changed:
+            while self.updates == seen:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self.changed.wait(left)
+
+    def scan_devices(self):
+        """The USB devices this PC can see, for the device list in the app."""
+        scan = getattr(self.backend, "scan", None)
+        if scan is None:
+            return {"devices": [], "error": None}
+        try:
+            return {"devices": scan(), "error": None}
+        except NoBackend as e:
+            return {"devices": [], "error": str(e)}
+        except Exception as e:
+            return {"devices": [], "error": f"Could not list USB devices: {e}"}
+
+    def _pause(self, seconds):
+        self._wake.wait(seconds)
+        self._wake.clear()
+
     def stop(self):
         self.stopped = True
+        self._wake.set()
         self.srv.close()
         tr = self.tr
         if tr:
@@ -449,6 +553,7 @@ class Tunnel:
     def _set(self, state, detail=None):
         with self.changed:
             self.state, self.detail = state, detail or STATE_TEXT[state]
+            self.updates += 1
             self.changed.notify_all()
 
     def _send(self, kind, chan=0, data=b"", timeout_ms=SEND_TIMEOUT_MS):
@@ -467,21 +572,25 @@ class Tunnel:
                 self.info = {}
                 self._set("no_cable")
                 if not isinstance(self.backend, FakeCableBackend):
-                    time.sleep(1)
+                    self._pause(1)
+                continue
+            except NoDriver as e:
+                self._set("no_driver", str(e))
+                self._pause(2)
                 continue
             except NoAccess as e:
                 self._set("no_access", str(e))
-                time.sleep(2)
+                self._pause(2)
                 continue
             except NoBackend as e:
                 self._set("no_backend", str(e))
-                time.sleep(5)
+                self._pause(5)
                 continue
             except OSError as e:
                 if self.stopped:
                     return
                 self._set("no_cable", f"{STATE_TEXT['no_cable']} ({e})")
-                time.sleep(1)
+                self._pause(1)
                 continue
             self.info = tr.info
             self.tr = tr
@@ -503,6 +612,9 @@ class Tunnel:
         last_hello = last_ping = 0.0
         last_rx = time.monotonic()
         while not self.stopped:
+            if self._wake.is_set():
+                self._wake.clear()
+                last_hello = 0.0
             now = time.monotonic()
             if not connected and now - last_hello >= HELLO_EVERY:
                 last_hello = now
