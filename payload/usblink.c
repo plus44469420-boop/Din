@@ -223,7 +223,8 @@ close_all(session_t *s) {
 void
 ulink_session(ulink_t *l, uint16_t port, const char *banner) {
   session_t *s = calloc(1, sizeof *s);
-  uint8_t *buf = malloc(ULINK_MAX_FRAME);
+  uint8_t *buf = malloc(ULINK_RX_BUF);
+  int greeted = 0;
 
   if(!s || !buf) {
     free(s);
@@ -238,7 +239,7 @@ ulink_session(ulink_t *l, uint16_t port, const char *banner) {
     uint32_t len;
     uint16_t id;
     chan_t *c;
-    int n = l->recv(l, buf, ULINK_MAX_FRAME, 1000);
+    int n = l->recv(l, buf, ULINK_RX_BUF, 1000);
 
     if(n < 0) {
       break;
@@ -267,7 +268,10 @@ ulink_session(ulink_t *l, uint16_t port, const char *banner) {
       memcpy(hello + 4, &max, 4);
       memcpy(hello + 8, banner, blen);
       send_small(s, UL_HELLO, 0, hello, (uint32_t)(8 + blen));
-      plat_notify("ps5cable: PC connected over USB (%s)", l->name);
+      if(!greeted) {
+        plat_notify("ps5cable: PC connected over USB (%s)", l->name);
+        greeted = 1;
+      }
       break;
     }
     case UL_PING:
@@ -278,7 +282,10 @@ ulink_session(ulink_t *l, uint16_t port, const char *banner) {
       break;
     case UL_DATA:
       pthread_mutex_lock(&s->clock);
-      if((c = find_chan(s, id)) && write_all(c->fd, buf + ULINK_HDR, len)) {
+      if(!(c = find_chan(s, id))) {
+        /* e.g. the payload restarted under a running PC tunnel */
+        send_small(s, UL_CLOSE, id, NULL, 0);
+      } else if(write_all(c->fd, buf + ULINK_HDR, len)) {
         shutdown(c->fd, SHUT_RDWR);
       }
       pthread_mutex_unlock(&s->clock);

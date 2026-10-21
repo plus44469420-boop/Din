@@ -23,6 +23,8 @@
 #define ULINK_HDR        12
 #define ULINK_MAX_DATA   (256 * 1024)
 #define ULINK_MAX_FRAME  (ULINK_HDR + ULINK_MAX_DATA + 1)
+/* Bulk reads are a whole number of max-size packets so a full frame fits. */
+#define ULINK_RX_BUF     (ULINK_MAX_DATA + 1024)
 
 enum {
   UL_HELLO = 1, /* data: version:u32 max_data:u32 banner (PS5 -> PC reply) */
