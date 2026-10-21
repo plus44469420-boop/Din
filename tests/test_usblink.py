@@ -84,6 +84,137 @@ class AssessTest(unittest.TestCase):
         self.assertIn("USB 2.0", " ".join(slow["notes"]))
 
 
+class FakeUsbError(Exception):
+    def __init__(self, msg, errno=None, backend_error_code=None):
+        super().__init__(msg)
+        self.errno, self.backend_error_code = errno, backend_error_code
+
+
+class FakeTimeout(FakeUsbError):
+    pass
+
+
+class FakeEndpoint:
+    def __init__(self, addr):
+        self.bEndpointAddress, self.bmAttributes = addr, 2  # bulk
+
+
+class FakeDevice:
+    idVendor, idProduct, speed = 0x067B, 0x27A1, 4
+
+    def __init__(self, kernel_driver=True):
+        self.calls = []
+        self.kernel_driver = kernel_driver
+        self.intf = [FakeEndpoint(0x81), FakeEndpoint(0x02)]
+        self.inbox = []
+
+    def is_kernel_driver_active(self, i):
+        return self.kernel_driver
+
+    def detach_kernel_driver(self, i):
+        self.calls.append(("detach", i))
+
+    def get_active_configuration(self):
+        return {(0, 0): self.intf}
+
+    def ctrl_transfer(self, *args, **kw):
+        self.calls.append(("ctrl",) + args)
+
+    def read(self, ep, buf, timeout):
+        if not self.inbox:
+            raise FakeTimeout("timeout", backend_error_code=-7)
+        item = self.inbox.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        buf[:len(item)] = __import__("array").array("B", item)
+        return len(item)
+
+    def write(self, ep, data, timeout):
+        self.calls.append(("write", ep, bytes(data)))
+        return len(data)
+
+
+class FakeCore:
+    USBError = FakeUsbError
+    USBTimeoutError = FakeTimeout
+
+    class NoBackendError(Exception):
+        pass
+
+    def __init__(self, devs):
+        self.devs = devs
+
+    def find(self, find_all, backend, custom_match):
+        return [d for d in self.devs if custom_match(d)]
+
+
+class FakeUtil:
+    ENDPOINT_IN, ENDPOINT_OUT, ENDPOINT_TYPE_BULK = 0x80, 0x00, 2
+
+    def __init__(self, claim_error=None):
+        self.claim_error = claim_error
+        self.claimed = []
+
+    @staticmethod
+    def endpoint_direction(addr):
+        return addr & 0x80
+
+    @staticmethod
+    def endpoint_type(attrs):
+        return attrs & 3
+
+    @staticmethod
+    def find_descriptor(intf, custom_match):
+        return next((e for e in intf if custom_match(e)), None)
+
+    def claim_interface(self, dev, i):
+        if self.claim_error:
+            raise self.claim_error
+        self.claimed.append(i)
+
+    def release_interface(self, dev, i):
+        pass
+
+    def dispose_resources(self, dev):
+        pass
+
+
+class PyUsbBackendTest(unittest.TestCase):
+    def backend(self, devs, util=None):
+        b = usblink.PyUsbBackend()
+        b._usb = (FakeCore(devs), util or FakeUtil(), None)
+        return b
+
+    def test_no_cable(self):
+        with self.assertRaises(usblink.NoDevice):
+            self.backend([]).open()
+
+    def test_opens_bridge_and_resets_it(self):
+        dev = FakeDevice()
+        tr = self.backend([dev]).open()
+        self.assertEqual((tr.ep_in, tr.ep_out), (0x81, 0x02))
+        self.assertIn(("detach", 0), dev.calls)
+        self.assertIn(("ctrl", 0xC0, usblink.PL_SET_FEATURE, usblink.PL_RESET, 0, 0), dev.calls)
+        self.assertEqual(tr.info["chip"], "Prolific PL27A1")
+        self.assertEqual(tr.info["usb_mbps"], 5000)
+
+        self.assertIsNone(tr.recv(10))
+        frame = usblink.encode(usblink.HELLO, 0, b"12345678banner")
+        dev.inbox.append(frame)
+        self.assertEqual(usblink.decode(tr.recv(10)), (usblink.HELLO, 0, b"12345678banner"))
+        dev.inbox.append(FakeUsbError("No such device", errno=19))
+        with self.assertRaises(ConnectionError):
+            tr.recv(10)
+        tr.send(frame, 10)
+        self.assertEqual(dev.calls[-1], ("write", 0x02, frame))
+
+    def test_driver_problem_is_no_access(self):
+        util = FakeUtil(claim_error=FakeUsbError("Operation not supported", backend_error_code=-12))
+        with self.assertRaises(usblink.NoAccess) as cm:
+            self.backend([FakeDevice()], util).open()
+        self.assertIn("PL27A1", str(cm.exception))
+
+
 class StateTest(unittest.TestCase):
     class Raising:
         def __init__(self, exc):
