@@ -1,4 +1,4 @@
-File transfer between a PC and a jailbroken PS5 over **one USB-C cable**: a USB bridge ("data link") cable with a Prolific **PL27A1** chip, from the PC's USB-C port to the PS5. No Ethernet, router or Wi-Fi.
+File transfer between a PC and a jailbroken PS5 over **one USB cable**: a USB bridge ("data link") cable with a Prolific **PL27A1** chip, with USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A ends. No Ethernet, router or Wi-Fi.
 
 ## Downloads
 
@@ -12,16 +12,16 @@ File transfer between a PC and a jailbroken PS5 over **one USB-C cable**: a USB 
 
 ## Quick start
 
-1. Get a **USB 3 bridge cable with the PL27A1 chip** (e.g. Plugable USBC-TRAN, USB-C ⇄ USB-C). A plain USB-C cable can't work: the PC and the PS5 are both USB hosts.
+1. Get a **USB 3 bridge cable with the PL27A1 chip**, with whichever ends suit your PC (USB-C or USB-A). A plain USB cable can't work: the PC and the PS5 are both USB hosts.
 2. **Windows only, once:** plug the cable into the PC, run [Zadig](https://zadig.akeo.ie/), pick the Prolific device **067B 27A1** and install **WinUSB**.
 3. Copy `ps5cable.elf` to the PS5 (USB stick + File Manager) and load it with your jailbreak's payload loader, or add it to your autoloader.
-4. Plug the cable into the PS5 (rear USB-A or the SuperSpeed front USB-C) and the PC, and start **ps5cable Hub**. The light turns green: **PS5 Connected**.
+4. Plug the cable into the PS5 (rear USB-A, or the SuperSpeed front USB-C) and into a USB 3 port on the PC (USB-C, or a blue USB-A port), and start **ps5cable Hub**. The light turns green: **PS5 Connected**.
 
 The [README](https://github.com/plus44469420-boop/Din#readme) has the full guide.
 
 ## What's in it
 
-- **USB-C link**: up to about 250 MB/s on a USB 3 bridge cable (about 35 MB/s on USB 2.0). The payload only listens on the console's loopback, so nothing on the PS5's network can reach it.
+- **USB link** over USB-C or USB-A bridge cables: up to about 250 MB/s on a USB 3 bridge cable (about 35 MB/s on USB 2.0). The payload only listens on the console's loopback, so nothing on the PS5's network can reach it.
 - **ps5cable Hub**, a desktop file hub with your PC on one side and the PS5 on the other.
   - Send, drag and drop, and copy back to the PC.
   - Resume, parallel transfers over the one cable, and progress with speed and ETA.

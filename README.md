@@ -1,6 +1,6 @@
 # ps5cable
 
-File transfer between a PC and a jailbroken PS5 over **one USB-C cable**, with no Ethernet, router or Wi-Fi. It has three parts:
+File transfer between a PC and a jailbroken PS5 over **one USB cable** (USB-C or USB-A ends), with no Ethernet, router or Wi-Fi. It has three parts:
 
 - **`payload/ps5cable.elf`**: a small file server that runs on the PS5 and talks to the PC over the USB cable.
 - **ps5cable Hub** (`ps5cable-hub.exe`, or `pc/hub.py`): a desktop file hub with your PC's files on one side and the PS5's on the other. You pick what to send and watch it transfer.
@@ -9,26 +9,36 @@ File transfer between a PC and a jailbroken PS5 over **one USB-C cable**, with n
 ![ps5cable Hub](docs/hub.png)
 
 ```
-PC USB-C ──[USB-C bridge ("data link") cable, PL27A1 chip]── PS5 USB-C (or rear USB-A)
+PC USB-C or USB-A ──[USB bridge ("data link") cable, PL27A1 chip]── PS5 USB-C or rear USB-A
 ```
 
 ## The cable: why it has to be a bridge cable
 
-The PS5's USB ports and your PC's USB ports are all **USB host** ports. Two hosts joined by a plain USB-C cable don't exchange any data: USB always needs one host and one device. So a normal USB-C to USB-C cable will not work, whatever it is rated for.
+The PS5's USB ports and your PC's USB ports are all **USB host** ports. Two hosts joined by a plain cable don't exchange any data: USB always needs one host and one device. So a normal USB-C to USB-C, USB-A to USB-C or USB-A to USB-A cable will not work, whatever it is rated for.
 
 A **USB bridge cable** (sold as a "data link", "transfer" or "PC-to-PC" cable) has a small chip in the middle that shows up as a USB device on *both* ends and passes data from one host to the other. ps5cable drives that chip directly with its own code on each side, so the PS5 needs no network driver and nothing else gets plugged in.
 
 | Cable | Chip | Best case |
 |---|---|---|
-| USB 3 bridge cable, e.g. Plugable USBC-TRAN (USB-C ⇄ USB-C) or USB3-TRAN (USB-A ⇄ USB-A); any cable that says **Prolific PL27A1** | PL27A1, USB 3.0 (5 Gbps) | **~250 MB/s**, about 15 GB per minute, roughly twice what the PS5's gigabit Ethernet port can do |
+| USB 3 bridge cable (e.g. Plugable's transfer cables); any cable that says **Prolific PL27A1** | PL27A1, USB 3.0 (5 Gbps) | **~250 MB/s**, about 15 GB per minute, roughly twice what the PS5's gigabit Ethernet port can do |
 | Older USB 2.0 bridge cable | PL25A1, USB 2.0 | ~35 MB/s |
 
-Check that the listing names the **PL27A1** chip. Cables built on other chips aren't supported yet. Adapters (USB-C to USB-A) at either end are fine.
+Check that the listing names the **PL27A1** chip. Cables built on other chips aren't supported yet.
 
-Both ends have to be USB 3 for full speed:
+### USB-C, USB-A, or one of each
 
-- **PS5:** use a rear USB-A port or the SuperSpeed front USB-C port. The original PS5's front USB-A port, and one of the PS5 Slim's two front USB-C ports, are USB 2.0 only (~35 MB/s).
-- **PC:** any USB 3 / USB-C data port, plugged in directly (not through a USB 2 hub).
+Bridge cables come as **USB-C ⇄ USB-C**, **USB-A ⇄ USB-C** and **USB-A ⇄ USB-A**, and all three work the same way. The chip in the middle is the same, so the app doesn't care which ends the cable has (USB doesn't report the connector shape anyway). A small USB-C ⇄ USB-A adapter on either end is fine too. What sets the speed is the USB generation of the two ports, so both ends need USB 3:
+
+| Cable | PC end | PS5 end |
+|---|---|---|
+| USB-C ⇄ USB-C | a USB-C port with data | the SuperSpeed front USB-C port |
+| USB-A ⇄ USB-C | the USB-C end in a USB-C port, or the USB-A end in a blue USB 3 port | the USB-A end in a rear USB-A port, or the USB-C end in the SuperSpeed front USB-C port |
+| USB-A ⇄ USB-A | a blue (USB 3) USB-A port | a rear USB-A port |
+
+- **PS5:** the rear USB-A ports are always SuperSpeed. The original PS5's front USB-A port, and one of the PS5 Slim's two front USB-C ports, are USB 2.0 only (~35 MB/s).
+- **PC:** USB-A ports that are blue (or teal or red, or marked SS) are USB 3. Black or white ones are USB 2.0. Plug in directly, not through a USB 2 hub.
+
+A USB-A ⇄ USB-C cable is a good fit for a PC with only USB-C ports and a PS5's rear USB-A port, or for a PC with only USB-A ports and the PS5's front USB-C port.
 
 The Hub and `ps5cable status` show the chip and the speed your PC's port negotiated, and the **speed test** measures both directions. It moves data in memory on the PS5, so nothing is written to its storage. A result around 35 MB/s means one end is on USB 2.0.
 
@@ -58,7 +68,7 @@ The payload has to be running on the PS5 before the PC can talk to it, and it ca
 
 1. Copy `ps5cable.elf` to a USB stick, plug it into the PS5 and use your File Manager to copy it to the PS5 (for example to `/data/ps5cable/`).
 2. Load it with your jailbreak's payload loader after the jailbreak runs. Most loaders can load an ELF from a file, and most autoloaders can start it on every jailbreak (for example by listing it in the autoloader's `autoload.txt`, or putting it in etaHEN's payload folder). Check your jailbreak's own instructions for where it looks.
-3. The PS5 shows **"ps5cable ready: connect the USB-C bridge cable to the PC"**. Loading it again replaces the running copy.
+3. The PS5 shows **"ps5cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC"**. Loading it again replaces the running copy.
 
 Then plug the cable into the PS5. The payload finds it within a second, and the PS5 shows **"ps5cable: PC connected over USB"** when the PC app connects.
 
@@ -66,7 +76,7 @@ Then plug the cable into the PS5. The payload finds it within a second, and the 
 
 1. Run your jailbreak and load the payload (setup step 3).
 2. Double-click **`ps5cable-hub.exe`**. To run from source instead, use `pc\start-hub.bat`, or `python pc/hub.py` on macOS or Linux. It opens in its own window.
-3. Plug in the USB-C cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over USB. Amber means the cable is there but the PS5 isn't answering yet (payload not running, or the other end not plugged in) or that Windows still needs the WinUSB driver; red means no cable is plugged into the PC. While it's not connected, the PS5 pane lists the steps still missing.
+3. Plug in the USB cable. The status light in the top bar turns **green and says "PS5 Connected"** as soon as the payload answers over USB. Amber means the cable is there but the PS5 isn't answering yet (payload not running, or the other end not plugged in) or that Windows still needs the WinUSB driver; red means no cable is plugged into the PC. While it's not connected, the PS5 pane lists the steps still missing.
    - Next to it, the **cable pill** shows the bridge chip and the USB speed your PC's port negotiated, e.g. *Prolific PL27A1 · USB 3.2 Gen 1 — Max ~250 MB/s*. It turns amber when something limits the link (a USB 2.0 port or a USB 2.0 bridge). Click it for the details and a **Run speed test** button.
 4. Pick what to send:
    - The **left pane is your PC**. Use the shortcut chips for Home, Desktop, Downloads and each drive letter, double-click folders to open them, and tick the files and folders you want. Shift-click selects a range, and Ctrl-click adds single items.
@@ -200,11 +210,11 @@ Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publ
 
 ## Troubleshooting
 
-- **"No USB bridge cable found".** The PC doesn't see a PL27A1/PL25A1 cable. Try another port, and on Windows check Device Manager for the Prolific device. A plain USB-C cable doesn't show up at all (see "The cable" above).
+- **"No USB bridge cable found".** The PC doesn't see a PL27A1/PL25A1 cable. Try another port, and on Windows check Device Manager for the Prolific device. A plain USB-C or USB-A cable doesn't show up at all (see "The cable" above).
 - **"Cable needs a driver" (Windows).** Install WinUSB on the cable with Zadig (setup step 2).
 - **"No permission to open the cable" (Linux).** Install the udev rule (setup step 2) and replug, or run as root.
-- **"USB-C cable found", but it never turns green.** The PS5 isn't answering: load `ps5cable.elf` on the PS5, check the cable is in the PS5, and watch the PS5's notifications. Unplugging and replugging the PS5 end makes the payload look for the cable again.
-- **About 35 MB/s.** One end is on USB 2.0. Move the PS5 end to a rear USB-A port or the SuperSpeed front USB-C port, and plug the PC end straight into a USB 3 port.
+- **"USB cable found", but it never turns green.** The PS5 isn't answering: load `ps5cable.elf` on the PS5, check the cable is in the PS5, and watch the PS5's notifications. Unplugging and replugging the PS5 end makes the payload look for the cable again.
+- **About 35 MB/s.** One end is on USB 2.0. Move the PS5 end to a rear USB-A port or the SuperSpeed front USB-C port, and plug the PC end straight into a USB-C port or a blue USB 3 USB-A port. The cable panel's port table lists the right ports for each cable type.
 - **Logs.** The payload writes to the PS5 kernel log (lines starting with `[ps5cable]` and `usb:`), which a klog viewer payload shows.
 
 ## How it works
