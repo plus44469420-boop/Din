@@ -187,7 +187,9 @@ jobs:
           sha256sum ps5cable.elf ps5cable-windows.zip ps5cable-linux-x64.tar.gz \
                     ps5cable-macos-arm64.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" $pre \
              --title "ps5cable $GITHUB_REF_NAME" --notes-file ../.github/release-notes.md \
              ps5cable-windows.zip ps5cable-linux-x64.tar.gz ps5cable-macos-arm64.tar.gz \
              ps5cable.elf SHA256SUMS.txt
