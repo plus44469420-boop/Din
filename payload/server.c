@@ -21,6 +21,7 @@
 
 #include "platform.h"
 #include "proto.h"
+#include "usblink.h"
 
 #ifndef VERSION_TAG
 #define VERSION_TAG "dev"
@@ -208,14 +209,15 @@ rm_rf(const char *path) {
   return rmdir(path);
 }
 
+static const char version[] = "ps5cable " VERSION_TAG
+#ifdef __PROSPERO__
+  " (ps5)";
+#else
+  " (host)";
+#endif
+
 static int
 handle_ping(int fd) {
-  static const char version[] = "ps5cable " VERSION_TAG
-#ifdef __PROSPERO__
-    " (ps5)";
-#else
-    " (host)";
-#endif
   size_t len = sizeof version - 1;
 
   if(send_res(fd, 0, 0, P5CX_PROTO_VER, len)) {
@@ -895,6 +897,10 @@ note_peer(const struct sockaddr_in *peer) {
   time_t now = time(NULL);
   char ip[INET_ADDRSTRLEN];
 
+  /* USB channels arrive over loopback; the USB link announces itself. */
+  if(peer->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
+    return;
+  }
   if(g_notify && (peer->sin_addr.s_addr != last_ip || now - last_seen > 600)) {
     inet_ntop(AF_INET, &peer->sin_addr, ip, sizeof ip);
     plat_notify("ps5cable: PC connected (%s)", ip);
@@ -962,10 +968,11 @@ serve(uint16_t port) {
 int
 main(int argc, char *argv[]) {
   uint16_t port = P5CX_PORT;
+  const char *cable = NULL;
   pthread_t thr;
   int c;
 
-  while((c = getopt(argc, argv, "p:qh")) != -1) {
+  while((c = getopt(argc, argv, "p:qC:h")) != -1) {
     switch(c) {
     case 'p':
       port = (uint16_t)atoi(optarg);
@@ -973,10 +980,14 @@ main(int argc, char *argv[]) {
     case 'q':
       g_notify = 0;
       break;
+    case 'C':
+      cable = optarg;
+      break;
     default:
-      printf("usage: %s [-p PORT] [-q]\n", argv[0]);
-      printf("  -p PORT  TCP+UDP port to listen on (default %d)\n", P5CX_PORT);
-      printf("  -q       no on-screen notifications\n");
+      printf("usage: %s [-p PORT] [-q] [-C HOST:PORT]\n", argv[0]);
+      printf("  -p PORT       TCP+UDP port to listen on (default %d)\n", P5CX_PORT);
+      printf("  -q            no on-screen notifications\n");
+      printf("  -C HOST:PORT  desktop build: use the fake USB cable at HOST:PORT\n");
       return EXIT_FAILURE;
     }
   }
@@ -986,12 +997,12 @@ main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  /* With a direct cable the link may come up after the payload starts, so
-   * wait for an address instead of exiting. */
-  while(!announce_addresses(port, 0)) {
-    sleep(2);
+  /* The USB link reaches the file server over loopback, so serving does not
+   * wait for a network address: a console on USB alone may never get one. */
+  usb_start(port, version, cable);
+  if(!announce_addresses(port, g_notify)) {
+    plat_notify("ps5cable ready: connect the USB bridge cable");
   }
-  announce_addresses(port, g_notify);
 
   if(!pthread_create(&thr, NULL, discovery_thread, (void *)(intptr_t)port)) {
     pthread_detach(thr);
