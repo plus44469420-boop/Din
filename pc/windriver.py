@@ -103,6 +103,7 @@ def make_inf(date=None):
 # without asking; the private key is deleted as soon as the catalog is signed.
 SIGN_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Security, PKI
 $dir = '__DIR__'
 $cat = Join-Path $dir '__CAT__'
 $cer = Join-Path $dir 'ps5cable.cer'
@@ -151,8 +152,13 @@ def _sign(d):
     script = (SIGN_SCRIPT.replace("__DIR__", q(d)).replace("__CAT__", CAT_NAME)
               .replace("__INF__", INF_NAME).replace("__SUBJECT__", q(CERT_SUBJECT)))
     encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+    # Started from PowerShell 7, these point Windows PowerShell at PowerShell
+    # 7's modules and command cache, which it can't load; without them it
+    # uses its own.
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in ("PSMODULEPATH", "PSMODULEANALYSISCACHEPATH")}
     _run([_system32(r"WindowsPowerShell\v1.0\powershell.exe"), "-NoProfile", "-NonInteractive",
-          "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], "Signing the driver")
+          "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], "Signing the driver", env)
 
 
 def _force_install(inf):
