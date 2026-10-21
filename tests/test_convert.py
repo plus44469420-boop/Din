@@ -17,7 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
-from test_e2e import free_port, tree_digest  # noqa: E402
+from fakecable import free_port, start_payload  # noqa: E402
+from test_e2e import tree_digest  # noqa: E402
 
 CONVERTER = ROOT / "converter" / "target" / "release" / (
     "ps5cable-convert.exe" if os.name == "nt" else "ps5cable-convert")
@@ -51,17 +52,20 @@ class ConvertTest(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix="ps5cable-convert-"))
         cls.game = make_game(cls.tmp / "pc")
         cls.out = cls.tmp / "out"
-        cls.ps5_port = free_port()
-        cls.ps5 = subprocess.Popen([str(ROOT / "payload" / "ps5cable-host"), "-p", str(cls.ps5_port)],
-                                   stdout=subprocess.DEVNULL)
+        cable = free_port()
+        cls.ps5 = start_payload(cable)
         settings = cls.tmp / "settings.json"
-        settings.write_text(json.dumps({"host": "127.0.0.1", "port": cls.ps5_port,
-                                        "convert_output": str(cls.out)}))
+        settings.write_text(json.dumps({"convert_output": str(cls.out)}))
         cls.hub = subprocess.Popen(
             [sys.executable, str(ROOT / "pc" / "hub.py"), "--no-browser", "--stay", "--settings", str(settings)],
-            stdout=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, text=True,
+            env=dict(os.environ, PS5CABLE_FAKE_CABLE=f"127.0.0.1:{cable}"))
         m = re.search(r"(http://127\.0\.0\.1:\d+)/\?t=(\S+)", cls.hub.stdout.readline())
         cls.base, cls.token = m.group(1), m.group(2)
+        deadline = time.monotonic() + 15
+        while not cls.api(cls, "GET", "/api/state")["status"]["connected"]:
+            assert time.monotonic() < deadline, "hub never connected over the fake cable"
+            time.sleep(0.2)
 
     @classmethod
     def tearDownClass(cls):

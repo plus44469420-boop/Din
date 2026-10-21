@@ -1,30 +1,24 @@
 """End-to-end tests: the desktop build of the payload server driven by the
-real PC client. Run with: python3 -m unittest discover -s tests -v"""
+real PC client over the USB link (on a fake cable).
+Run with: python3 -m unittest discover -s tests -v"""
 
 import contextlib
 import io
-import os
 import random
 import shutil
-import socket
-import subprocess
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pc"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import ps5cable  # noqa: E402
-
-
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+import usblink  # noqa: E402
+from fakecable import FakePS5, build_payload  # noqa: E402
 
 
 def run_cli(*argv):
@@ -45,31 +39,21 @@ def tree_digest(root):
 class ServerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(["make", "-s", "host"], cwd=ROOT / "payload", check=True)
-        cls.port = free_port()
-        cls.proc = subprocess.Popen(
-            [str(ROOT / "payload" / "ps5cable-host"), "-p", str(cls.port)],
-            stdout=subprocess.DEVNULL)
-        deadline = time.monotonic() + 10
-        while True:
-            try:
-                socket.create_connection(("127.0.0.1", cls.port), timeout=0.5).close()
-                break
-            except OSError:
-                if time.monotonic() > deadline:
-                    raise
-                time.sleep(0.1)
+        build_payload()
+        cls.ps5 = FakePS5()
+        cls.port = cls.ps5.port
+        ps5cable.LINK = cls.ps5.tunnel
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.kill()
-        cls.proc.wait()
+        ps5cable.LINK = None
+        cls.ps5.close()
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="ps5cable-test-"))
         self.remote = self.tmp / "remote"
         self.remote.mkdir()
-        self.base = ["--host", "127.0.0.1", "--port", str(self.port)]
+        self.base = []
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -242,42 +226,40 @@ class ServerTest(unittest.TestCase):
                 c.put_file(str(local), str(blocker / "child.bin"))
             self.assertEqual(c.ping()[0], ps5cable.PROTO_VER)
 
-    def test_discovery(self):
-        found = ps5cable.discover(self.port, timeout=1.0, targets={"127.0.0.1"})
-        self.assertEqual([ip for ip, _ in found], ["127.0.0.1"])
-        self.assertTrue(found[0][1].startswith(str(self.port)))
+    def test_status_reports_usb_link(self):
+        rc, out = run_cli("status")
+        self.assertEqual(rc, 0)
+        self.assertIn("PS5 CONNECTED over USB", out)
+        self.assertIn("Fake cable", out)
+        self.assertIn("/data:", out)
+
+    def test_large_file_crosses_many_frames(self):
+        data = random.Random(11).randbytes(3 * usblink.MAX_DATA + 12345)
+        (self.tmp / "frames.bin").write_bytes(data)
+        with self.conn() as c:
+            c.put_file(str(self.tmp / "frames.bin"), str(self.remote / "frames.bin"))
+            c.get_file(str(self.remote / "frames.bin"), str(self.tmp / "back.bin"))
+        self.assertEqual((self.remote / "frames.bin").read_bytes(), data)
+        self.assertEqual((self.tmp / "back.bin").read_bytes(), data)
 
 
-class SendPayloadTest(unittest.TestCase):
-    def test_streams_elf_to_loader(self):
-        received = bytearray()
-        srv = socket.socket()
-        srv.bind(("127.0.0.1", 0))
-        srv.listen(1)
+class NoCableTest(unittest.TestCase):
+    class Unplugged:
+        def open(self):
+            raise usblink.NoDevice("No USB bridge cable found.")
 
-        def loader():
-            conn, _ = srv.accept()
-            with conn:
-                while chunk := conn.recv(65536):
-                    received.extend(chunk)
-
-        t = threading.Thread(target=loader)
-        t.start()
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(b"\x7fELF" + os.urandom(100000))
+    def test_commands_explain_missing_cable(self):
+        link = usblink.Tunnel(self.Unplugged()).start()
+        ps5cable.LINK = link
         try:
-            # Point the post-send ping at a closed port so it gives up quickly.
-            rc, out = run_cli("--host", "127.0.0.1", "--port", str(free_port()),
-                              "send-payload", f.name,
-                              "--loader-port", str(srv.getsockname()[1]))
+            rc, out = run_cli("--wait", "0.5", "status")
+            self.assertEqual(rc, 1)
+            self.assertIn("No USB bridge cable found", out)
+            with self.assertRaisesRegex(SystemExit, "PS5 not connected over USB"):
+                run_cli("--wait", "0.2", "ls", "/data")
         finally:
-            t.join(5)
-            srv.close()
-            data = Path(f.name).read_bytes()
-            os.unlink(f.name)
-        self.assertEqual(bytes(received), data)
-        self.assertIn("Sent", out)
-        self.assertEqual(rc, 1)
+            ps5cable.LINK = None
+            link.stop()
 
 
 if __name__ == "__main__":

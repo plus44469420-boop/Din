@@ -1,4 +1,5 @@
-"""Tests for the ps5cable Hub HTTP API, run against the desktop payload build."""
+"""Tests for the ps5cable Hub HTTP API, run against the desktop payload build
+on a fake USB cable."""
 
 import json
 import os
@@ -17,24 +18,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
-from test_e2e import free_port, tree_digest  # noqa: E402
-from test_linkinfo import fake_usb_sysfs  # noqa: E402
+from fakecable import build_payload, free_port, start_payload  # noqa: E402
+from test_e2e import tree_digest  # noqa: E402
 
 
 class HubTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(["make", "-s", "host"], cwd=ROOT / "payload", check=True)
+        build_payload()
         cls.tmp = Path(tempfile.mkdtemp(prefix="ps5cable-hub-"))
-        cls.ps5_port = free_port()
-        cls.ps5 = subprocess.Popen(
-            [str(ROOT / "payload" / "ps5cable-host"), "-p", str(cls.ps5_port)],
-            stdout=subprocess.DEVNULL)
+        cable = free_port()
+        cls.ps5 = start_payload(cable)
         settings = cls.tmp / "settings.json"
-        settings.write_text(json.dumps({"host": "127.0.0.1", "port": cls.ps5_port}))
-        # Pretend the cable runs through a gigabit USB adapter stuck on a USB 2 port.
-        sysfs = fake_usb_sysfs(cls.tmp / "sys", usb_speed="480")
-        env = dict(os.environ, PS5CABLE_SYSFS_ROOT=str(sysfs), PS5CABLE_IFACE="enx001")
+        # Settings from the Ethernet versions are ignored.
+        settings.write_text(json.dumps({"host": "192.168.88.2", "port": 9113, "jobs": 3}))
+        env = dict(os.environ, PS5CABLE_FAKE_CABLE=f"127.0.0.1:{cable}")
         cls.hub = subprocess.Popen(
             [sys.executable, str(ROOT / "pc" / "hub.py"), "--no-browser", "--stay",
              "--settings", str(settings)],
@@ -43,6 +41,10 @@ class HubTest(unittest.TestCase):
         m = re.search(r"(http://127\.0\.0\.1:\d+)/\?t=(\S+)", line)
         assert m, line
         cls.base, cls.token = m.group(1), m.group(2)
+        deadline = time.monotonic() + 15
+        while not cls.api(cls, "GET", "/api/state")["status"]["connected"]:
+            assert time.monotonic() < deadline, "hub never connected over the fake cable"
+            time.sleep(0.2)
 
     @classmethod
     def tearDownClass(cls):
@@ -93,26 +95,29 @@ class HubTest(unittest.TestCase):
     def test_state_reports_connection(self):
         st = self.api("GET", "/api/state")
         self.assertTrue(st["status"]["connected"], st["status"])
+        self.assertEqual(st["status"]["state"], "connected")
         self.assertIn("ps5cable", st["status"]["banner"])
+        self.assertGreater(st["status"]["total"], 0)
+        self.assertNotIn("host", st["settings"])
+        self.assertEqual(st["settings"]["jobs"], 3)
 
-    def test_state_reports_cable_adapter(self):
+    def test_state_reports_usb_cable(self):
         link = self.api("GET", "/api/state")["status"]["link"]
-        self.assertEqual(link["chip"], "Realtek RTL8153 (Gigabit)")
-        self.assertEqual(link["usb_label"], "USB 2.0 Hi-Speed (480 Mbps)")
-        self.assertEqual(link["level"], "warn")
-        self.assertEqual(link["expected_mbs"], 38.0)
-        self.assertTrue(link["bottleneck"].startswith("USB link"))
-        self.assertEqual(len(link["limits"]), 3)
-        self.assertIn("USB 2.0", " ".join(link["notes"]))
-        self.assertEqual(self.api("GET", "/api/link?refresh=1")["link"]["summary"],
-                         link["summary"])
+        self.assertEqual(link["connection"], "USB-C bridge cable")
+        self.assertEqual(link["chip"], "Fake cable (test)")
+        self.assertEqual(self.api("GET", "/api/link")["link"]["summary"], link["summary"])
+
+    def test_network_endpoints_are_gone(self):
+        for path in ("/api/connect", "/api/discover", "/api/send-payload"):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.api("POST", path, {})
+            self.assertEqual(cm.exception.code, 404, path)
 
     def test_speedtest(self):
         r = self.api("POST", "/api/speedtest", {"seconds": 1})
         self.assertGreater(r["up_mbs"], 0)
         self.assertGreater(r["down_mbs"], 0)
-        self.assertIn(r["verdict"], ("ok", "warn"))
-        self.assertEqual(r["expected_mbs"], 38.0)
+        self.assertEqual(r["verdict"], "ok")
         self.assertEqual(self.api("GET", "/api/state")["status"]["speedtest"]["up_mbs"],
                          r["up_mbs"])
 
