@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""ps5cable - move files between a PC and a jailbroken PS5 over a direct cable.
+"""ps5cable - move files between a PC and a jailbroken PS5 over a USB cable
+(a USB bridge cable with USB-C or USB-A ends).
 
-Talks to the ps5cable payload (payload/ps5cable.elf) running on the console.
-Standard library only; works on Windows, macOS and Linux with Python 3.8+.
+Talks to the ps5cable payload (payload/ps5cable.elf) running on the console,
+through a USB bridge cable (see usblink.py). Needs Python 3.8+ and pyusb
+(pip install pyusb libusb-package); works on Windows, macOS and Linux.
 
 Examples:
-    python ps5cable.py send-payload ps5cable.elf
+    python ps5cable.py status
     python ps5cable.py put "D:/Games/PPSA01234" /data/homebrew
     python ps5cable.py get /data/homebrew/PPSA01234 ./backup
     python ps5cable.py ls /data
@@ -23,11 +25,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import linkinfo  # noqa: E402
+import usblink  # noqa: E402
 
+# The payload's file server port on the console's loopback (proto.h).
 DEFAULT_PORT = 9113
-ELFLDR_PORT = 9021
-DEFAULT_HOST = "192.168.88.2"
 MAGIC = b"P5CX"
 PROTO_VER = 1
 
@@ -308,124 +309,28 @@ def fmt_time(s):
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
-def discover(port=DEFAULT_PORT, timeout=1.5, targets=None):
-    """Broadcasts on every local IPv4 interface and returns [(ip, banner)]."""
-    if targets is None:
-        targets = {"255.255.255.255"}
-        try:
-            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-                ip = info[4][0]
-                if not ip.startswith("127."):
-                    targets.add(ip.rsplit(".", 1)[0] + ".255")
-        except socket.gaierror:
-            pass
-        # The setup scripts in this repo use this subnet for the direct cable.
-        targets.add("192.168.88.255")
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(0.2)
-    found = {}
-    try:
-        for t in targets:
-            try:
-                sock.sendto(b"P5CX?", (t, port))
-            except OSError:
-                pass
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                data, (ip, _) = sock.recvfrom(256)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            if data.startswith(b"P5CX!"):
-                found[ip] = data[5:].decode(errors="replace").strip()
-    finally:
-        sock.close()
-    return sorted(found.items())
+# Set by tests to a Tunnel on a fake cable; otherwise the process-wide one.
+LINK = None
 
 
-def local_ip_for(host):
-    """The PC address the OS would use to reach `host` (no packets sent)."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect((host, 9))
-        return s.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        s.close()
+def get_link():
+    return LINK or usblink.shared_tunnel()
 
 
-def _tcp_state(host, port, timeout):
-    """'open', 'refused' (host is up, nothing listening) or 'silent'."""
-    try:
-        socket.create_connection((host, port), timeout=timeout).close()
-        return "open"
-    except ConnectionRefusedError:
-        return "refused"
-    except OSError:
-        return "silent"
-
-
-def probe(host, port=DEFAULT_PORT, loader_port=ELFLDR_PORT, timeout=1.0):
-    """Works out how far along the cable link is.
-
-    state is one of:
-      connected  the ps5cable payload answered (banner/free/total filled in)
-      loader     the PS5 is on the cable with its ELF loader up; send the payload
-      reachable  something answers at `host`, but neither port is open
-      offline    nothing answers; `same_subnet` tells whether the PC even has
-                 an address on the cable's /24
-    """
-    out = {"host": host, "port": port, "state": "offline", "banner": None,
-           "free": None, "total": None, "local_ip": local_ip_for(host)}
-    out["same_subnet"] = bool(out["local_ip"]) and \
-        out["local_ip"].rsplit(".", 1)[0] == host.rsplit(".", 1)[0]
-    try:
-        with Connection(host, port, timeout=timeout) as c:
-            c.sock.settimeout(timeout * 3)
-            _, out["banner"] = c.ping()
-            try:
-                out["free"], out["total"] = c.df("/data")
-            except RemoteError:
-                pass
-        out["state"] = "connected"
-        return out
-    except ConnectionRefusedError:
-        out["state"] = "reachable"
-    except (OSError, ConnectionError):
-        pass
-    loader = _tcp_state(host, loader_port, timeout)
-    if loader == "open":
-        out["state"] = "loader"
-    elif loader == "refused":
-        out["state"] = "reachable"
-    return out
-
-
-def resolve_host(args):
-    if args.host:
-        return args.host
-    env = os.environ.get("PS5_HOST")
-    if env:
-        return env
-    found = discover(args.port)
-    if found:
-        return found[0][0]
-    return DEFAULT_HOST
+def open_link(wait):
+    """(host, port) of the local end of the USB link, or exits explaining why
+    the PS5 is not reachable."""
+    link = get_link()
+    if not link.wait(wait):
+        sys.exit(f"PS5 not connected over USB: {link.detail}")
+    return "127.0.0.1", link.port
 
 
 def connect(args):
-    host = resolve_host(args)
     try:
-        return Connection(host, args.port)
+        return Connection(args.host, args.port)
     except OSError as e:
-        sys.exit(f"Cannot reach the ps5cable payload at {host}:{args.port}: {e}\n"
-                 "Is the cable plugged in, is the payload running, and are both "
-                 "sides on the same subnet? Try: python ps5cable.py discover")
+        sys.exit(f"Cannot reach the ps5cable payload over USB: {e}")
 
 
 def remote_join(*parts):
@@ -434,90 +339,51 @@ def remote_join(*parts):
 
 # --- commands -------------------------------------------------------------
 
-def cmd_discover(args):
-    found = discover(args.port, timeout=2.0)
-    if not found:
-        print("No PS5 answered. Check the cable, the IP setup, and that the "
-              "payload is running.")
-        return 1
-    for ip, banner in found:
-        print(f"{ip}\tps5cable {banner}")
-    return 0
-
-
-def cmd_send_payload(args):
-    # Discovery needs the payload, which is not running yet.
-    host = args.host or os.environ.get("PS5_HOST") or DEFAULT_HOST
-    data = Path(args.elf).read_bytes()
-    with socket.create_connection((host, args.loader_port), timeout=10) as s:
-        s.sendall(data)
-    print(f"Sent {args.elf} ({human(len(data))}) to {host}:{args.loader_port}")
-    for _ in range(20):
-        time.sleep(0.5)
-        try:
-            with Connection(host, args.port, timeout=2) as c:
-                _, banner = c.ping()
-                print(f"Payload is up: {banner}")
-                return 0
-        except OSError:
-            pass
-    print("Payload sent, but it did not answer yet. Watch the PS5 screen for a "
-          "notification.")
-    return 1
-
-
-STATUS_TEXT = {
-    "connected": "PS5 CONNECTED",
-    "loader": "PS5 found on the cable, payload not running (run: send-payload)",
-    "reachable": "PS5 answers on the cable, but neither the payload nor an ELF loader "
-                 "is listening (run the jailbreak first)",
-    "offline": "No PS5 on the cable",
-}
-
-
 def cmd_status(args):
-    host = args.host or os.environ.get("PS5_HOST") or DEFAULT_HOST
-    st = probe(host, args.port)
-    print(STATUS_TEXT[st["state"]] + (f": {st['banner']}" if st["banner"] else ""))
-    print(f"  PS5 {host}, this PC {st['local_ip'] or 'no route'}")
-    if st["total"]:
-        print(f"  /data: {human(st['free'])} free of {human(st['total'])}")
-    if st["state"] == "offline" and not st["same_subnet"]:
-        print(f"  This PC has no address on {host.rsplit('.', 1)[0]}.x, so the cable "
-              "adapter is unplugged or not set up (run the setup-direct-link script).")
-    if st["local_ip"]:
-        print_adapter(linkinfo.detect(st["local_ip"]))
-    return 0 if st["state"] == "connected" else 1
+    link = get_link()
+    link.wait(args.wait)
+    st = link.status()
+    print(("PS5 CONNECTED over USB: " + st["banner"]) if st["connected"] else st["detail"])
+    if st["connected"]:
+        try:
+            with Connection("127.0.0.1", link.port, timeout=5) as c:
+                free, total = c.df("/data")
+            print(f"  /data: {human(free)} free of {human(total)}")
+        except (OSError, RemoteError):
+            pass
+    if st["link"]:
+        print_link(st["link"])
+    return 0 if st["connected"] else 1
 
 
-def print_adapter(info):
-    print(f"  Adapter: {info.get('summary') or 'unknown'}")
-    print(f"  Connection: {info['connection']}"
-          + (f", interface {info['interface']}" if info.get("interface") else ""))
+def print_link(info):
+    print(f"  Cable: {info.get('chip') or 'unknown'}"
+          + (f" ({info['vendor_id']}:{info['product_id']})" if info.get("vendor_id") else ""))
     if info.get("usb_label"):
-        print(f"  USB link: {info['usb_label']}")
-    if info.get("link_mbps"):
-        print(f"  Ethernet link: {info['link_mbps']} Mbps")
-    print(f"  Best case: about {linkinfo.human_rate(info['expected_mbs'])} "
-          f"(limited by {info['bottleneck']})")
+        print(f"  This PC's USB port: {info['usb_label']}")
+    if info.get("expected_mbs"):
+        print(f"  Best case: about {usblink.human_rate(info['expected_mbs'])} "
+              f"(limited by {info['bottleneck']})")
     for note in info["notes"]:
         print(f"  - {note}")
+    print("  Cable types that work (the connector doesn't change the speed):")
+    for t in info.get("cable_types", []):
+        print(f"    {t['ends']}: PC {t['pc']}; PS5 {t['ps5']}")
 
 
 def cmd_speedtest(args):
-    host = resolve_host(args)
     with connect(args) as c:
-        print(f"Measuring the cable link to {host} (about 8 seconds)...")
+        print("Measuring the USB link (about 8 seconds)...")
         try:
             res = c.speed_test()
         except RemoteError as e:
             sys.exit(f"The payload on the PS5 is too old for speed tests ({e}). "
-                     "Send the new ps5cable.elf.")
-    info = linkinfo.detect(local_ip_for(host))
-    verdict = linkinfo.interpret_speedtest(info, res["up_mbs"], res["down_mbs"])
-    print(f"  PC -> PS5: {linkinfo.human_rate(res['up_mbs'])}")
-    print(f"  PS5 -> PC: {linkinfo.human_rate(res['down_mbs'])}")
-    print_adapter(info)
+                     "Load the new ps5cable.elf.")
+    info = get_link().link_info() or usblink.assess({})
+    verdict = usblink.interpret_speedtest(info, res["up_mbs"], res["down_mbs"])
+    print(f"  PC -> PS5: {usblink.human_rate(res['up_mbs'])}")
+    print(f"  PS5 -> PC: {usblink.human_rate(res['down_mbs'])}")
+    print_link(info)
     for note in verdict["notes"]:
         print(f"  * {note}")
     return 0
@@ -563,7 +429,7 @@ def cmd_mv(args):
 
 
 def cmd_cp(args):
-    host = resolve_host(args)
+    host = args.host
     with connect(args) as c:
         try:
             plan, _, _ = plan_remote_copy(c, args.src, args.dest)
@@ -857,8 +723,8 @@ def run_transfers(host, port, plan, upload, jobs=4, on_bytes=None,
 
 
 def _cli_transfer(args, upload, sources, dest):
-    host = resolve_host(args)
-    with Connection(host, args.port) as c:
+    host = args.host
+    with connect(args) as c:
         try:
             if upload:
                 plan, skipped = plan_upload(c, sources, dest, args.resume)
@@ -870,7 +736,7 @@ def _cli_transfer(args, upload, sources, dest):
     total = sum(size - off for _, _, size, off in plan)
     verb, prep = ("Uploading", "to") if upload else ("Downloading", "from")
     where = dest if upload else ", ".join(sources)
-    print(f"{verb} {len(plan)} files ({human(total)}) {prep} {host}:{where}"
+    print(f"{verb} {len(plan)} files ({human(total)}) {prep} PS5:{where}"
           + (f", skipping {skipped} already complete" if skipped else ""))
     progress = Progress(total, len(plan))
     failures = run_transfers(host, args.port, plan, upload, args.jobs,
@@ -892,27 +758,17 @@ def cmd_get(args):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="ps5cable",
-        description="Transfer files between this PC and a PS5 over a direct cable.")
-    p.add_argument("--host", help="PS5 IP (default: $PS5_HOST, then auto-discover, "
-                                  f"then {DEFAULT_HOST})")
-    p.add_argument("--port", type=int, default=DEFAULT_PORT,
-                   help=f"ps5cable payload port (default {DEFAULT_PORT})")
+        prog=os.environ.get("PS5CABLE_PROG", "ps5cable"),
+        description="PS5 Cable command line: transfer files between this PC and a PS5 "
+                    "over a USB bridge cable (USB-C or USB-A ends).")
+    p.add_argument("--wait", type=float, default=10,
+                   help="seconds to wait for the PS5 on the USB cable (default 10)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("discover", help="find PS5s running the payload")
-    s.set_defaults(func=cmd_discover)
-
-    s = sub.add_parser("send-payload", help="send ps5cable.elf to the ELF loader")
-    s.add_argument("elf", nargs="?", default=str(Path(__file__).resolve().parent.parent
-                                                  / "payload" / "ps5cable.elf"))
-    s.add_argument("--loader-port", type=int, default=ELFLDR_PORT)
-    s.set_defaults(func=cmd_send_payload)
-
-    s = sub.add_parser("status", help="show whether the PS5 is connected over the cable")
+    s = sub.add_parser("status", help="show whether the PS5 is connected over USB, and the cable's speed")
     s.set_defaults(func=cmd_status)
 
-    s = sub.add_parser("speedtest", help="measure the cable link speed both ways")
+    s = sub.add_parser("speedtest", help="measure the USB link speed both ways")
     s.set_defaults(func=cmd_speedtest)
 
     s = sub.add_parser("ping", help="check the payload is reachable")
@@ -973,6 +829,8 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.func is not cmd_status:
+        args.host, args.port = open_link(args.wait)
     try:
         return args.func(args)
     except RemoteError as e:

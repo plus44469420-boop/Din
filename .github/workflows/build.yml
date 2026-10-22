@@ -53,17 +53,19 @@ jobs:
 
       - name: Package for Linux
         run: |
-          d=out/ps5cable-linux-x64
-          mkdir -p "$d"
-          cp payload/ps5cable.elf converter/target/release/ps5cable-convert \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html \
-             pc/setup-direct-link-unix.sh README.md LICENSE "$d/"
-          tar -C out -czf out/ps5cable-linux-x64.tar.gz ps5cable-linux-x64
+          d=out/PS5-Cable
+          mkdir -p "$d/app"
+          cp pc/ps5-cable payload/ps5cable.elf README.md LICENSE "$d/"
+          cp converter/target/release/ps5cable-convert pc/ps5cable.py pc/usblink.py \
+             pc/convert.py pc/hub.py pc/windriver.py pc/hub_ui.html pc/requirements.txt \
+             pc/60-ps5cable.rules "$d/app/"
+          tar -C out -czf out/PS5-Cable-Linux.tar.gz PS5-Cable
+          tar tzvf out/PS5-Cable-Linux.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5cable-linux-x64
-          path: out/ps5cable-linux-x64.tar.gz
+          name: PS5-Cable-Linux
+          path: out/PS5-Cable-Linux.tar.gz
 
   macos-app:
     needs: build
@@ -87,17 +89,17 @@ jobs:
 
       - name: Package for macOS
         run: |
-          d=out/ps5cable-macos-arm64
-          mkdir -p "$d"
-          cp payload/ps5cable.elf converter/target/release/ps5cable-convert \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html \
-             pc/setup-direct-link-unix.sh README.md LICENSE "$d/"
-          tar -C out -czf out/ps5cable-macos-arm64.tar.gz ps5cable-macos-arm64
+          d=out/PS5-Cable
+          mkdir -p "$d/app"
+          cp pc/ps5-cable payload/ps5cable.elf README.md LICENSE "$d/"
+          cp converter/target/release/ps5cable-convert pc/ps5cable.py pc/usblink.py \
+             pc/convert.py pc/hub.py pc/windriver.py pc/hub_ui.html pc/requirements.txt "$d/app/"
+          tar -C out -czf out/PS5-Cable-macOS.tar.gz PS5-Cable
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5cable-macos-arm64
-          path: out/ps5cable-macos-arm64.tar.gz
+          name: PS5-Cable-macOS
+          path: out/PS5-Cable-macOS.tar.gz
 
   windows-app:
     needs: build
@@ -123,41 +125,63 @@ jobs:
       - name: Build ps5cable-convert.exe
         run: cargo build --release --manifest-path converter/Cargo.toml
 
-      - name: Build ps5cable-hub.exe and ps5cable.exe
+      - name: Build PS5 Cable.exe
         shell: bash
         run: |
-          pip install pyinstaller
-          pyinstaller --onefile --noconsole --name ps5cable-hub --paths pc \
+          pip install pyinstaller -r pc/requirements.txt
+          pyinstaller --onefile --noconsole --name "PS5 Cable" --paths pc \
+            --collect-all libusb_package --hidden-import usb.backend.libusb1 \
             --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." \
             --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
-          pyinstaller --onefile --console --name ps5cable --paths pc pc/ps5cable.py
 
-      - name: Smoke test the hub executable
+      - name: Smoke test the app
         shell: bash
         run: |
-          ./dist/ps5cable-hub.exe --no-browser --stay --port 8799 --settings hub-test.json > hub.log 2>&1 &
+          "./dist/PS5 Cable.exe" --no-browser --stay --port 8799 --settings hub-test.json > hub.log 2>&1 &
           for i in $(seq 1 30); do grep -q "running at" hub.log && break; sleep 1; done
           url=$(grep -o 'http[^ ]*' hub.log)
-          curl -sf "$url" | grep -q "ps5cable Hub"
-          curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state | grep -q ps5cable.elf
-          curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/convert/jobs | grep -q ps5cable-convert.exe
-          taskkill //F //IM ps5cable-hub.exe || true
+          page=$(curl -sf "$url")
+          grep -q "<title>PS5 Cable</title>" <<<"$page"
+          state=$(curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/state)
+          grep -q ps5cable.elf <<<"$state"
+          # No cable on the runner: libusb loaded and found nothing, rather than "USB support missing".
+          for i in $(seq 1 10); do
+            state=$(curl -sf -H "X-Hub-Token: ${url##*t=}" -X POST -d '{}' http://127.0.0.1:8799/api/refresh)
+            grep -q '"state": "no_cable"' <<<"$state" && break
+            sleep 1
+          done
+          echo "$state"
+          grep -q '"state": "no_cable"' <<<"$state"
+          jobs=$(curl -sf -H "X-Hub-Token: ${url##*t=}" http://127.0.0.1:8799/api/convert/jobs)
+          grep -q ps5cable-convert.exe <<<"$jobs"
+          taskkill //F //IM "PS5 Cable.exe" || true
+
+      # The runner is an administrator, so this is the elevated half of the
+      # app's Install driver button: Windows must accept the self-signed package.
+      - name: Install the cable's USB driver
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath 'dist\PS5 Cable.exe' -Wait -PassThru `
+            -ArgumentList '--install-driver', "$PWD\driver.json"
+          Get-Content driver.json
+          if ($p.ExitCode -ne 0) { exit 1 }
+          $listed = pnputil /enum-drivers | Select-String -Context 0,6 'ps5cable.inf'
+          $listed
+          if (-not ($listed | Out-String).Contains('PS5 Cable')) { exit 1 }
 
       - name: Package
         shell: bash
         run: |
-          mkdir -p out/ps5cable
-          cp dist/ps5cable-hub.exe dist/ps5cable.exe payload/ps5cable.elf \
-             converter/target/release/ps5cable-convert.exe \
-             pc/ps5cable.py pc/linkinfo.py pc/convert.py pc/hub.py pc/hub_ui.html pc/start-hub.bat \
-             pc/setup-direct-link-windows.ps1 pc/setup-direct-link-unix.sh \
-             README.md LICENSE out/ps5cable/
-          (cd out && 7z a -bd ps5cable-windows.zip ps5cable > /dev/null)
+          d="out/PS5 Cable"
+          mkdir -p "$d"
+          cp "dist/PS5 Cable.exe" payload/ps5cable.elf README.md "$d/"
+          cp LICENSE "$d/LICENSE.txt"
+          (cd out && 7z a -bd PS5-Cable-Windows.zip "PS5 Cable" > /dev/null && 7z l PS5-Cable-Windows.zip)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5cable-windows
-          path: out/ps5cable-windows.zip
+          name: PS5-Cable-Windows
+          path: out/PS5-Cable-Windows.zip
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -176,10 +200,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd assets
-          sha256sum ps5cable.elf ps5cable-windows.zip ps5cable-linux-x64.tar.gz \
-                    ps5cable-macos-arm64.tar.gz > SHA256SUMS.txt
+          sha256sum PS5-Cable-Windows.zip PS5-Cable-Linux.tar.gz PS5-Cable-macOS.tar.gz \
+                    ps5cable.elf > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-             --title "ps5cable $GITHUB_REF_NAME" --notes-file ../.github/release-notes.md \
-             ps5cable-windows.zip ps5cable-linux-x64.tar.gz ps5cable-macos-arm64.tar.gz \
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" $pre \
+             --title "PS5 Cable $GITHUB_REF_NAME" --notes-file ../.github/release-notes.md \
+             PS5-Cable-Windows.zip PS5-Cable-Linux.tar.gz PS5-Cable-macOS.tar.gz \
              ps5cable.elf SHA256SUMS.txt

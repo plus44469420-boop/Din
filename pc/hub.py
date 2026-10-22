@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ps5cable Hub - a two-pane PC <-> PS5 file manager.
+"""PS5 Cable - a two-pane PC <-> PS5 file manager.
 
 Runs a small web server on 127.0.0.1 and opens it in an app window (Edge or
 Chrome in --app mode when available, otherwise the default browser). Pick
@@ -15,7 +15,6 @@ import os
 import posixpath
 import secrets
 import shutil
-import socket
 import string
 import subprocess
 import sys
@@ -30,12 +29,11 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import convert  # noqa: E402
-import linkinfo  # noqa: E402
 import ps5cable  # noqa: E402
+import usblink  # noqa: E402
+import windriver  # noqa: E402
 
-APP_NAME = "ps5cable Hub"
-# Adapter detection shells out to PowerShell on Windows, which takes ~1 s.
-LINK_INFO_TTL = 15
+APP_NAME = "PS5 Cable"
 SETTINGS_PATH = Path.home() / ".ps5cable-hub.json"
 # Without a heartbeat for this long (and no transfer running) the hub exits,
 # so closing the window does not leave a hidden server behind. Background tabs
@@ -58,6 +56,7 @@ def find_payload():
     for p in (resource_dir() / "ps5cable.elf",
               Path(sys.executable).resolve().parent / "ps5cable.elf",
               Path(__file__).resolve().parent / "ps5cable.elf",
+              Path(__file__).resolve().parent.parent / "ps5cable.elf",
               Path(__file__).resolve().parent.parent / "payload" / "ps5cable.elf"):
         if p.is_file():
             return p
@@ -65,18 +64,17 @@ def find_payload():
 
 
 class Settings:
-    DEFAULTS = {"host": ps5cable.DEFAULT_HOST, "port": ps5cable.DEFAULT_PORT,
-                "local_dir": str(Path.home()), "remote_dir": "/data",
-                "resume": True, "jobs": 4, "auto_payload": True,
-                "loader_port": ps5cable.ELFLDR_PORT,
+    DEFAULTS = {"local_dir": str(Path.home()), "remote_dir": "/data",
+                "resume": True, "jobs": 4,
                 "convert_output": str(convert.DEFAULT_OUTPUT), "convert_prefs": {}}
 
     def __init__(self, path=SETTINGS_PATH):
         self.path = path
         self.data = dict(self.DEFAULTS)
         try:
-            self.data.update(json.loads(path.read_text()))
-        except (OSError, ValueError):
+            saved = json.loads(path.read_text())
+            self.data.update({k: v for k, v in saved.items() if k in self.DEFAULTS})
+        except (OSError, ValueError, AttributeError):
             pass
         self.lock = threading.Lock()
 
@@ -157,57 +155,51 @@ class Job:
 
 
 class Hub:
-    def __init__(self, settings):
+    def __init__(self, settings, link=None):
         self.settings = settings
+        self.link = link or usblink.shared_tunnel()
         self.jobs = {}
         self.jobs_lock = threading.Lock()
         self.last_seen = time.monotonic()
         self.status_lock = threading.Lock()
         self.status_cache = None
         self.places_cache = None
-        self.payload_sent_at = -1e9
-        self.payload_lock = threading.Lock()
-        self.link_cache = (None, None, -1e9)  # (local_ip, info, monotonic time)
-        self.link_lock = threading.Lock()
         self.speedtest_lock = threading.Lock()
+        self.driver_lock = threading.Lock()
         self.last_speedtest = None
         self.converter = convert.Converter()
 
     # --- PS5 helpers --------------------------------------------------------
 
     def target(self):
-        return self.settings.get("host"), int(self.settings.get("port"))
+        return "127.0.0.1", self.link.port
 
     def conn(self, timeout=5.0):
         host, port = self.target()
         return ps5cable.Connection(host, port, timeout=timeout)
 
     def refresh_status(self):
-        """Probes the cable and, when the PS5's ELF loader is up but our payload
-        is not, sends the payload so plugging in is all it takes."""
-        host, port = self.target()
-        loader_port = int(self.settings.get("loader_port"))
-        st = ps5cable.probe(host, port, loader_port)
-        if st["state"] == "loader" and self.settings.get("auto_payload"):
-            with self.payload_lock:
-                due = time.monotonic() - self.payload_sent_at > 20
-                if due:
-                    self.payload_sent_at = time.monotonic()
-            elf = find_payload() if due else None
-            if elf:
-                try:
-                    send_elf(host, loader_port, elf)
-                    st["state"] = "starting"
-                except OSError as e:
-                    st["error"] = f"auto-send failed: {e}"
-        st["connected"] = st["state"] == "connected"
-        st["auto_payload"] = bool(self.settings.get("auto_payload"))
-        prev_state = (self.status_cache or {}).get("state")
-        st["link"] = self.link_info(st.get("local_ip"), force=prev_state != st["state"])
-        st["speedtest"] = self.last_speedtest
+        """USB link state, plus the PS5's free space once the payload answers."""
+        st = self.link.status()
+        st.update(free=None, total=None)
+        if st["connected"]:
+            try:
+                with self.conn(timeout=3) as c:
+                    c.sock.settimeout(5)
+                    _, st["banner"] = c.ping()
+                    st["free"], st["total"] = c.df("/data")
+            except ps5cable.RemoteError:
+                pass
+            except OSError as e:
+                st.update(connected=False, state="waiting", error=str(e),
+                          detail=usblink.STATE_TEXT["waiting"])
         with self.status_lock:
             prev = self.status_cache
             self.status_cache = st
+        prev_chip = ((prev or {}).get("link") or {}).get("chip")
+        if prev_chip != (st.get("link") or {}).get("chip"):
+            self.last_speedtest = None
+        st["speedtest"] = self.last_speedtest
         if st["connected"] and not (prev and prev.get("connected")):
             self.places_cache = None
         return st
@@ -224,21 +216,18 @@ class Hub:
             try:
                 st = self.refresh_status()
             except Exception as e:  # keep the monitor alive whatever happens
-                st = {"connected": False, "state": "offline", "error": str(e)}
+                st = {"connected": False, "state": "no_cable", "detail": str(e), "error": str(e)}
                 with self.status_lock:
                     self.status_cache = st
-            time.sleep(5 if st.get("connected") else 2)
+            # Wakes up early when the cable or payload comes or goes.
+            if st.get("connected"):
+                self.link.wait(3, states=("no_cable", "no_access", "no_driver", "no_backend",
+                                          "waiting"))
+            else:
+                self.link.wait(1)
 
-    def link_info(self, local_ip, force=False):
-        """Adapter type and speed limits for the interface facing the PS5."""
-        with self.link_lock:
-            ip, info, at = self.link_cache
-            if force or ip != local_ip or time.monotonic() - at > LINK_INFO_TTL:
-                info = linkinfo.detect(local_ip)
-                self.link_cache = (local_ip, info, time.monotonic())
-                if ip != local_ip:
-                    self.last_speedtest = None
-            return info
+    def link_info(self):
+        return self.link.link_info()
 
     def speed_test(self, seconds):
         if not self.speedtest_lock.acquire(blocking=False):
@@ -246,9 +235,8 @@ class Hub:
         try:
             with self.conn(timeout=15) as c:
                 raw = c.speed_test(seconds=seconds)
-            st = self.status()
-            info = st.get("link") or self.link_info(st.get("local_ip"))
-            result = linkinfo.interpret_speedtest(info, raw["up_mbs"], raw["down_mbs"])
+            info = self.link_info() or usblink.assess({})
+            result = usblink.interpret_speedtest(info, raw["up_mbs"], raw["down_mbs"])
             result["at"] = time.time()
             result["expected_mbs"] = info.get("expected_mbs")
             self.last_speedtest = result
@@ -539,12 +527,6 @@ def build_remote_places(conn):
     return {"places": places, "game_folders": folders, "scan_paths": scan_paths}
 
 
-def send_elf(host, loader_port, path):
-    data = Path(path).read_bytes()
-    with socket.create_connection((host, loader_port), timeout=5) as s:
-        s.sendall(data)
-
-
 # --- HTTP -------------------------------------------------------------------
 
 class ApiError(Exception):
@@ -555,7 +537,7 @@ class ApiError(Exception):
 
 def make_handler(hub, token, ui_html, allowed_hosts):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ps5cable-hub"
+        server_version = "ps5cable"
 
         def log_message(self, fmt, *args):
             pass
@@ -597,7 +579,7 @@ def make_handler(hub, token, ui_html, allowed_hosts):
                     return self._send(HTTPStatus.FORBIDDEN, "forbidden", "text/plain")
                 if parse_qs(url.query).get("t", [""])[0] != token:
                     return self._send(HTTPStatus.FORBIDDEN,
-                                      "Open the link printed by ps5cable Hub.", "text/plain")
+                                      "Open the link printed by PS5 Cable.", "text/plain")
                 return self._send(HTTPStatus.OK, ui_html.replace("__HUB_TOKEN__", token),
                                   "text/html; charset=utf-8")
             if url.path == "/favicon.ico":
@@ -639,7 +621,10 @@ def _require(args, *keys):
 def api_state(hub, args):
     return {"app": APP_NAME, "settings": hub.settings.snapshot(),
             "status": hub.status(), "payload": str(find_payload() or ""),
-            "local_places": local_places(), "os": os.name}
+            "local_places": local_places(), "os": os.name,
+            "can_install_driver": windriver.supported(),
+            "usb_guide": {"cable_types": usblink.CABLE_TYPES, "pc_port_tip": usblink.PC_PORT_TIP,
+                          "ps5_port_tip": usblink.PS5_PORT_TIP}}
 
 
 def api_heartbeat(hub, args):
@@ -647,18 +632,38 @@ def api_heartbeat(hub, args):
 
 
 def api_settings(hub, args):
-    for key in ("port", "loader_port"):
-        if key in args:
-            args[key] = int(args[key])
     if "jobs" in args:
         args["jobs"] = max(1, min(16, int(args["jobs"])))
     return {"settings": hub.settings.update(**args)}
 
 
-def api_connect(hub, args):
-    if args.get("host"):
-        hub.settings.update(host=args["host"].strip())
+def api_refresh(hub, args):
     return hub.refresh_status()
+
+
+def api_usb_rescan(hub, args):
+    """Tries the cable again right away and lists every USB device the PC sees."""
+    hub.link.rescan(wait=1.5)
+    usb = hub.link.scan_devices()
+    if windriver.supported():
+        usb["devices"] = windriver.supplement(usb["devices"], windriver.list_devices())
+    return {"status": hub.refresh_status(), "usb": usb}
+
+
+def api_usb_install_driver(hub, args):
+    """Windows: puts WinUSB on the cable (one UAC prompt), then looks for it again."""
+    if not windriver.supported():
+        raise ApiError("Only Windows needs a driver for the cable.")
+    if not hub.driver_lock.acquire(blocking=False):
+        raise ApiError("The driver is already being installed.", HTTPStatus.CONFLICT)
+    try:
+        result = windriver.install_elevated()
+    except windriver.DriverError as e:
+        raise ApiError(str(e))
+    finally:
+        hub.driver_lock.release()
+    hub.link.rescan(wait=3)
+    return {"result": result, "status": hub.refresh_status(), "usb": hub.link.scan_devices()}
 
 
 def api_remote_places(hub, args):
@@ -670,9 +675,7 @@ def api_remote_places(hub, args):
 
 
 def api_link(hub, args):
-    st = hub.status()
-    return {"link": hub.link_info(st.get("local_ip"), force=bool(args.get("refresh"))),
-            "speedtest": hub.last_speedtest}
+    return {"link": hub.link_info(), "speedtest": hub.last_speedtest}
 
 
 def api_speedtest(hub, args):
@@ -754,27 +757,6 @@ def api_convert_send(hub, args):
         raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
     return hub.start_job(True, [job.result["path"]], args["dest"], True,
                          int(hub.settings.get("jobs"))).to_dict()
-
-
-def api_discover(hub, args):
-    found = ps5cable.discover(int(hub.settings.get("port")), timeout=1.5)
-    return {"found": [{"host": ip, "banner": b} for ip, b in found]}
-
-
-def api_send_payload(hub, args):
-    path = Path(args["path"]) if args.get("path") else find_payload()
-    if not path or not path.is_file():
-        raise ApiError("ps5cable.elf not found. Put it next to the app or pick it.")
-    hub.payload_sent_at = time.monotonic()
-    send_elf(hub.settings.get("host"),
-             int(args.get("loader_port") or hub.settings.get("loader_port")), path)
-    for _ in range(16):
-        time.sleep(0.5)
-        st = hub.refresh_status()
-        if st["connected"]:
-            return st
-    raise ApiError("Payload sent, but it did not answer. Check the PS5 screen.",
-                   HTTPStatus.BAD_GATEWAY)
 
 
 def api_local_list(hub, args):
@@ -934,7 +916,9 @@ ROUTES = {
     ("GET", "/api/remote/list"): api_remote_list,
     ("GET", "/api/remote/places"): api_remote_places,
     ("POST", "/api/settings"): api_settings,
-    ("POST", "/api/connect"): api_connect,
+    ("POST", "/api/refresh"): api_refresh,
+    ("POST", "/api/usb/rescan"): api_usb_rescan,
+    ("POST", "/api/usb/install-driver"): api_usb_install_driver,
     ("GET", "/api/link"): api_link,
     ("POST", "/api/speedtest"): api_speedtest,
     ("GET", "/api/convert/jobs"): api_convert_jobs,
@@ -944,8 +928,6 @@ ROUTES = {
     ("POST", "/api/convert/cancel"): api_convert_cancel,
     ("POST", "/api/convert/clear"): api_convert_clear,
     ("POST", "/api/convert/send"): api_convert_send,
-    ("POST", "/api/discover"): api_discover,
-    ("POST", "/api/send-payload"): api_send_payload,
     ("POST", "/api/local/mkdir"): api_local_mkdir,
     ("POST", "/api/local/open"): api_local_open,
     ("POST", "/api/remote/mkdir"): api_remote_mkdir,
@@ -996,13 +978,30 @@ def idle_watchdog(hub):
 
 
 def main(argv=None):
+    # A windowed build started with the admin prompt can lose --install-driver
+    # from sys.argv. The command line Windows actually passed still has it.
+    if argv is None and os.name == "nt" and "--install-driver" not in sys.argv:
+        try:
+            recovered = windriver.windows_argv()
+        except OSError:
+            recovered = None
+        if recovered and "--install-driver" in recovered:
+            # pythonw's command line is `pythonw hub.py --install-driver RESULT`.
+            # The frozen app's is `PS5 Cable.exe --install-driver RESULT`.
+            if not str(recovered[0]).startswith("-"):
+                recovered = recovered[1:]
+            argv = recovered
     p = argparse.ArgumentParser(description=APP_NAME)
     p.add_argument("--port", type=int, default=0, help="local UI port (default: random)")
     p.add_argument("--no-browser", action="store_true", help="do not open a window")
     p.add_argument("--stay", action="store_true",
                    help="keep running after the window is closed")
     p.add_argument("--settings", type=Path, default=SETTINGS_PATH)
+    p.add_argument("--install-driver", metavar="RESULT_JSON", nargs="?", const="",
+                   help="Windows, as administrator: install the cable's USB driver and exit")
     args = p.parse_args(argv)
+    if args.install_driver is not None:
+        sys.exit(windriver.run_elevated_child(args.install_driver))
 
     hub = Hub(Settings(args.settings))
     token = secrets.token_urlsafe(24)

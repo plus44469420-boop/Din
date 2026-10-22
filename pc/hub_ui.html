@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ps5cable Hub</title>
+<title>PS5 Cable</title>
 <style>
   :root {
     --bg: #090c13;
@@ -68,10 +68,6 @@
   }
   .brand .logo svg { width: 18px; height: 18px; color: #fff; }
   .brand small { color: var(--muted); font-weight: 500; }
-  .conn {
-    display: flex; align-items: center; gap: 8px; margin-left: 12px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 4px 6px 4px 12px;
-  }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px #ef444422; }
   .dot.on { background: var(--ok); box-shadow: 0 0 0 3px #22c55e22; }
   .link {
@@ -192,9 +188,7 @@
   .size-sum ul { margin: 0; padding-left: 18px; max-height: 200px; overflow: auto; }
   .size-sum li { display: flex; gap: 10px; } .size-sum li span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rail .tip { font-size: 11.5px; color: #fcd34d; background: #2a210c; border: 1px solid #6b4a12; border-radius: 10px; padding: 8px 10px; line-height: 1.35; }
-  .conn input { width: 140px; border: none; background: transparent; padding: 4px 2px; font-family: var(--mono); }
-  .conn input:focus { box-shadow: none; }
-  .conn .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
   .spacer { flex: 1; }
   .meter { display: flex; flex-direction: column; gap: 4px; min-width: 190px; font-size: 12px; color: var(--muted); }
   .bar { height: 6px; border-radius: 99px; background: #1b2332; overflow: hidden; }
@@ -267,6 +261,23 @@
   .steps li { display: flex; gap: 10px; align-items: center; color: var(--muted); }
   .steps .tick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #334155; display: grid; place-items: center; font-size: 12px; flex: none; }
   .steps li.done { color: var(--text); }
+  table.ctypes { border-collapse: collapse; font-size: 12.5px; width: 100%; text-align: left; }
+  table.ctypes th, table.ctypes td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+  table.ctypes th { color: var(--muted); font-weight: 600; border-top: none; }
+  table.ctypes td:first-child { white-space: nowrap; font-weight: 600; }
+  .usblist { width: 100%; text-align: left; display: grid; gap: 6px; font-size: 12.5px; }
+  .usblist .head { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
+  .usblist .head small { color: var(--muted); }
+  .usblist ul { list-style: none; margin: 0; padding: 0; max-height: 170px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .usblist li { display: grid; padding: 6px 10px; border-top: 1px solid #161d2a; }
+  .usblist li:first-child { border-top: none; }
+  .usblist li b { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .usblist li small { color: var(--muted); font-size: 11.5px; }
+  .usblist li.bridge { background: #0f2b1a; } .usblist li.bridge b { color: #86efac; }
+  .usblist p { margin: 0; }
+  .usblist .warn-text, .usblist.err-text { font-size: 12px; } .usblist .warn-text { color: #fcd34d; } .usblist.err-text { color: #fca5a5; }
+  .guide { text-align: left; display: grid; gap: 8px; }
+  .guide p { margin: 0; color: var(--muted); font-size: 12.5px; }
   .steps li.done .tick { background: var(--ok); border-color: var(--ok); color: #052e14; font-weight: 800; }
   .steps li.active { color: #fcd34d; }
   .steps li.active .tick { border-color: var(--warn); animation: blink 1s ease-in-out infinite; }
@@ -325,40 +336,30 @@
   button.primary.danger:hover:not(:disabled) { background: #f87171; border-color: #f87171; color: #fff; }
   .modal .row { display: flex; justify-content: flex-end; gap: 8px; }
   .modal input { width: 100%; }
-  .found { display: grid; gap: 6px; }
-  .found button { justify-content: space-between; }
-  .found code { font-family: var(--mono); }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0l-3-3m3 3l-3 3"/></svg></div>
-    <div>ps5cable Hub <small>PC ⇄ PS5</small></div>
+    <div>PS5 Cable <small>PC ⇄ PS5</small></div>
   </div>
-  <div class="link" id="link" title="Cable link to the PS5">
+  <div class="link" id="link" title="USB link to the PS5">
     <span class="lamp"></span>
-    <span class="txt"><b id="link-title">PS5 not connected</b><small id="link-sub">Checking the cable…</small></span>
+    <span class="txt"><b id="link-title">PS5 not connected</b><small id="link-sub">Looking for the USB cable…</small></span>
   </div>
-  <button class="cable" id="cable" title="Cable / adapter details and speed test">
+  <button class="cable" id="cable" title="USB cable details and speed test" hidden>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4m8-4v4M6 7h12v3a6 6 0 01-12 0zM12 16v2a3 3 0 003 3h3"/></svg>
-    <span class="txt"><b id="cable-title">Detecting adapter…</b><small id="cable-sub"></small></span>
+    <span class="txt"><b id="cable-title">USB bridge cable</b><small id="cable-sub"></small></span>
   </button>
-  <div class="conn" title="PS5 address on the direct cable">
-    <span class="label">PS5 IP</span>
-    <input id="host" type="text" spellcheck="false" placeholder="192.168.88.2">
-    <button class="primary" id="btn-connect">Connect</button>
-  </div>
-  <button class="ghost" id="btn-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find PS5</button>
   <button class="ghost" id="btn-convert" title="Convert games: package, game image (.ffpkg/.exfat/.ffpfs/.ffpfsc) or folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"/><rect x="15" y="3" width="6" height="8" rx="1"/><rect x="3" y="13" width="6" height="8" rx="1"/></svg>Convert</button>
-  <button class="ghost" id="btn-payload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>Send payload</button>
   <div class="spacer"></div>
   <div class="meter" id="ps5-meter" hidden>
     <div><span id="ps5-banner"></span></div>
     <div class="bar"><i id="ps5-used"></i></div>
     <div id="ps5-free"></div>
   </div>
-  <button class="ghost icon" id="btn-quit" title="Quit ps5cable Hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 6.3a8 8 0 1011.4 0"/></svg></button>
+  <button class="ghost icon" id="btn-quit" title="Quit PS5 Cable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 6.3a8 8 0 1011.4 0"/></svg></button>
 </header>
 
 <main>
@@ -376,7 +377,6 @@
       <label title="Skip files that are already complete and continue partial ones"><input type="checkbox" id="opt-resume"> Skip / resume existing</label>
       <label title="Parallel connections. More helps with many small files">Parallel <input type="number" id="opt-jobs" min="1" max="16"></label>
       <label><input type="checkbox" id="opt-hidden"> Show hidden</label>
-      <label title="When the PS5's ELF loader is found on the cable, start ps5cable on it automatically"><input type="checkbox" id="opt-auto"> Auto-start payload</label>
     </div>
     <div class="tip" id="pkg-tip" hidden></div>
   </div>
@@ -935,23 +935,92 @@ async function remoteCopy(sources, dest, move) {
 let dragSide = null;
 
 function disconnectedCard() {
-  const st = app.status || { state: "offline" };
-  const ip = app.settings ? app.settings.host : "192.168.88.2";
-  const cable = st.state !== "offline";
-  const loader = ["loader", "starting", "connected"].includes(st.state);
+  const st = app.status || { state: "starting" };
+  const plugged = ["no_access", "no_driver", "waiting", "connected"].includes(st.state);
+  const opened = ["waiting", "connected"].includes(st.state);
   const step = (done, active, ...text) => el("li", { class: done ? "done" : active ? "active" : "" },
     el("span", { class: "tick" }, done ? "✓" : ""), el("span", {}, ...text));
+  const elf = app.payloadPath ? el("code", {}, app.payloadPath) : "ps5cable.elf";
   return el("div", { class: "empty" }, el("div", { class: "card" },
     el("div", { html: ICONS.plug.replace("<svg", '<svg class="big"') }),
-    el("h3", {}, cable ? "PS5 found on the cable" : "PS5 not connected"),
+    el("h3", {}, opened ? "USB cable found" : "PS5 not connected"),
     el("ol", { class: "steps" },
-      step(cable, !cable, "Cable plugged in, PS5 set to LAN with IP ", el("code", {}, ip)),
-      step(loader, cable && !loader, "Jailbreak running (ELF loader on port 9021)"),
-      step(false, loader, st.state === "starting" ? "Starting ps5cable…" : "ps5cable payload running")),
+      step(plugged, !plugged, "USB bridge (data link) cable plugged into this PC, with a USB-C or USB-A end"),
+      step(opened, ["no_access", "no_driver"].includes(st.state),
+        app.os === "nt" ? "USB driver installed on the cable (once)" : "Cable can be opened by this app"),
+      step(false, opened, "Other end in a PS5 USB port, with the PS5 Cable payload running (load ",
+        elf, " with your jailbreak)")),
     el("div", { style: "display:flex; gap:8px" },
-      el("button", { class: "primary", onclick: sendPayload, disabled: !cable }, "Send payload"),
-      el("button", { onclick: () => connect() }, "Check again")),
-    el("small", { style: "color:#6b7689" }, linkSubtitle(st))));
+      el("button", { class: st.state === "no_driver" ? "" : "primary", title: "Look for the cable again and list every USB device on this PC",
+                     onclick: (e) => rescanUsb(e.currentTarget) },
+        el("span", { html: ICONS.refresh, style: "display:contents" }), "Rescan USB"),
+      app.canInstallDriver ? el("button", {
+        class: st.state === "no_driver" ? "primary" : "",
+        title: "Puts Windows' WinUSB driver on the bridge cable so this app can use it. Windows asks for your OK once.",
+        onclick: (e) => installDriver(e.currentTarget) }, "Install driver") : null),
+    el("small", { style: "color:#6b7689; max-width: 420px" }, st.detail || linkSubtitle(st)),
+    usbDeviceList(),
+    el("details", {}, el("summary", {}, "USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A: which ports?"),
+      cableGuide())));
+}
+
+function usbDeviceList() {
+  const s = app.usbScan;
+  if (!s) return null;
+  if (s.error) return el("div", { class: "usblist err-text" }, s.error);
+  const n = s.devices.length;
+  return el("div", { class: "usblist" },
+    el("div", { class: "head" }, el("b", {}, `${n} USB device${n === 1 ? "" : "s"} on this PC`),
+      el("small", {}, "scanned " + new Date(s.at).toLocaleTimeString())),
+    n ? el("ul", {}, s.devices.map((d) => el("li", { class: d.bridge ? "bridge" : "" },
+      el("b", {}, d.name), el("small", {}, [d.kind, d.speed, d.id].filter(Boolean).join(" · ")))))
+      : el("p", {}, "No USB devices found."),
+    !s.devices.some((d) => d.bridge)
+      ? el("p", { class: "warn-text" }, "No USB bridge cable among them. A plain USB cable never shows up here: " +
+          "it needs a bridge chip such as the Prolific PL27A1. Check that the cable is pushed fully into this PC.")
+      : null);
+}
+
+async function installDriver(btn) {
+  btn.disabled = true;
+  btn.textContent = "Installing… choose Yes, then wait";
+  try {
+    const r = await api("POST", "/api/usb/install-driver", {});
+    app.usbScan = { ...r.usb, at: Date.now() };
+    toast(r.result.message, "ok");
+    applyStatus(r.status);
+    if (!app.connected) remote.renderList();
+  } catch (e) {
+    toast(e.message, "err");
+    if (document.body.contains(btn)) { btn.disabled = false; btn.textContent = "Install driver"; }
+  }
+}
+
+async function rescanUsb(btn) {
+  if (btn) { btn.disabled = true; btn.lastChild.textContent = "Scanning…"; }
+  try {
+    const r = await api("POST", "/api/usb/rescan", {});
+    app.usbScan = { ...r.usb, at: Date.now() };
+    applyStatus(r.status);
+    if (!app.connected) remote.renderList();
+    const bridge = r.usb.devices.some((d) => d.bridge);
+    toast(r.status.connected ? "PS5 connected over USB" : bridge ? "Found the USB bridge cable" : "No USB bridge cable found",
+          r.status.connected || bridge ? "ok" : "err");
+  } catch (e) {
+    toast(e.message, "err");
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.lastChild.textContent = "Rescan USB"; }
+  }
+}
+
+function cableGuide() {
+  const g = app.usbGuide;
+  if (!g) return "";
+  return el("div", { class: "guide" },
+    el("table", { class: "ctypes" },
+      el("tr", {}, el("th", {}, "Cable"), el("th", {}, "PC end"), el("th", {}, "PS5 end")),
+      g.cable_types.map((t) => el("tr", {}, el("td", {}, t.ends), el("td", {}, t.pc), el("td", {}, t.ps5)))),
+    el("p", {}, "All three work the same: the connector doesn't change the speed, the ports' USB generation does. " +
+      g.pc_port_tip + " " + g.ps5_port_tip));
 }
 
 const local = new Pane("local");
@@ -977,22 +1046,27 @@ function updateRail() {
 
 const LINK_TEXT = {
   connected: ["PS5 Connected", "ok"],
-  starting: ["Starting ps5cable on the PS5…", "warn"],
-  loader: ["PS5 found on cable", "warn"],
-  reachable: ["PS5 found on cable", "warn"],
-  offline: ["PS5 not connected", ""],
+  waiting: ["USB cable found", "warn"],
+  no_access: ["Cable can't be opened", "warn"],
+  no_driver: ["Cable needs a driver", "warn"],
+  no_backend: ["USB support missing", "warn"],
+  no_cable: ["PS5 not connected", ""],
+  starting: ["PS5 not connected", ""],
 };
 
 function linkSubtitle(st) {
-  const ip = st.host || (app.settings && app.settings.host) || "";
   switch (st.state) {
-    case "connected": return `Cable link OK · ${ip}${st.local_ip ? " ⇄ PC " + st.local_ip : ""}`;
-    case "starting": return "Payload sent, waiting for it to start";
-    case "loader": return st.auto_payload ? "Starting payload…" : "Click Send payload to start ps5cable";
-    case "reachable": return "Run your jailbreak (ELF loader on port 9021)";
-    default:
-      if (st.same_subnet === false) return `No ${ip.replace(/\.\d+$/, ".x")} address on this PC. Plug in the cable`;
-      return `No answer from ${ip}. Check cable & PS5 LAN settings`;
+    case "connected": {
+      const usb = st.link && st.link.usb_label ? " · " + st.link.usb_label.replace(/ \(.*/, "") : "";
+      return "Connected over USB" + usb;
+    }
+    case "waiting": return "Waiting for the PS5 Cable payload on the PS5";
+    case "no_driver": return "Click Install driver (once)";
+    case "no_access": return app.os === "nt" ? "Another program may be using the cable" : "No permission to open the cable";
+    case "no_backend": return "Install pyusb and libusb";
+    case "starting": return "Looking for the USB cable…";
+    case "no_cable": return "A normal USB-C cable will not show up";
+    default: return "Plug in a USB bridge cable (USB-C or USB-A ends)";
   }
 }
 
@@ -1005,12 +1079,10 @@ function applyStatus(st) {
   link.className = "link" + (cls ? " " + cls : "");
   $("link-title").textContent = title;
   $("link-sub").textContent = linkSubtitle(st);
-  link.title = st.error || linkSubtitle(st);
-  document.title = (app.connected ? "PS5 Connected" : title) + " · ps5cable Hub";
-  remote.linkEl.textContent = app.connected ? "Connected" : (cls === "warn" ? "Found" : "Offline");
+  link.title = st.detail || st.error || linkSubtitle(st);
+  document.title = (app.connected ? "PS5 Connected" : title) + " · PS5 Cable";
+  remote.linkEl.textContent = app.connected ? "Connected" : (st.state === "waiting" ? "Cable found" : "Offline");
   remote.linkEl.className = "linkchip" + (app.connected ? " ok" : "");
-  $("btn-connect").textContent = app.connected ? "Connected" : "Connect";
-  $("btn-connect").classList.toggle("primary", !app.connected);
   const m = $("ps5-meter");
   m.hidden = !app.connected;
   if (app.connected) {
@@ -1022,37 +1094,36 @@ function applyStatus(st) {
     }
   } else remote.freeEl.textContent = "";
   if (app.connected && !was) {
-    toast("PS5 connected over the cable", "ok");
+    toast("PS5 connected over USB", "ok");
     loadRemotePlaces();
     remote.load(remote.path || app.settings.remote_dir);
   }
   if (!app.connected && was) { remote.renderList(); toast("Lost connection to the PS5", "err"); }
-  if (!app.connected && !was) remote.renderList();
+  if (!app.connected && (!was || app.lastState !== st.state)) remote.renderList();
+  app.lastState = st.state;
   renderCable(st.link);
   remote.renderActions(); updateRail();
   clearTimeout(app.statusTimer);
   app.statusTimer = setTimeout(pollStatus, app.connected ? 5000 : 2000);
 }
 
-// ---------------------------------------------------------------- cable / adapter
+// ---------------------------------------------------------------- USB cable
 
 const fmtRate = (v) => v == null ? "—" : `${v >= 10 ? Math.round(v) : v.toFixed(1)} MB/s`;
-const fmtMbps = (v) => v == null ? null : v >= 1000 ? `${v / 1000} Gbps` : `${v} Mbps`;
 
 function renderCable(link) {
   const b = $("cable");
   if (!link) { b.hidden = true; return; }
   b.hidden = false;
   b.className = "cable" + (["ok", "warn", "bad"].includes(link.level) ? " " + link.level : "");
-  $("cable-title").textContent = link.summary || link.connection || "Unknown adapter";
+  $("cable-title").textContent = link.summary || "USB bridge cable";
   const st = app.status && app.status.speedtest;
   let sub;
-  if (link.bus === "virtual") sub = "No cable adapter in use";
-  else if (link.link_down) sub = "No Ethernet link on the adapter";
-  else if (st) sub = `Measured ${fmtRate(Math.min(st.up_mbs, st.down_mbs))} · max ~${fmtRate(link.expected_mbs)}`;
-  else sub = `Max ~${fmtRate(link.expected_mbs)} · limited by ${link.bottleneck.replace(/ \(.*/, "")}`;
+  if (st) sub = `Measured ${fmtRate(Math.min(st.up_mbs, st.down_mbs))}` + (link.expected_mbs ? ` · max ~${fmtRate(link.expected_mbs)}` : "");
+  else if (link.expected_mbs) sub = `Max ~${fmtRate(link.expected_mbs)} · limited by ${link.bottleneck.replace(/ \(.*/, "")}`;
+  else sub = "Click for a speed test";
   $("cable-sub").textContent = sub;
-  b.title = (link.notes || []).join("\n") || "Cable / adapter details and speed test";
+  b.title = (link.notes || []).join("\n") || "USB cable details and speed test";
   if (app.cablePanel) app.cablePanel.render();
 }
 
@@ -1063,25 +1134,22 @@ function openCablePanel() {
   const close = () => { bg.remove(); app.cablePanel = null; };
   const bg = el("div", { class: "modal-bg", onclick: (e) => { if (e.target === bg) close(); } },
     el("div", { class: "modal wide" },
-      el("h3", {}, "Cable & adapter"), body,
+      el("h3", {}, "USB cable"), body,
       el("div", { class: "row" }, el("button", { onclick: close }, "Close"), runBtn)));
   let running = false;
 
   const render = () => {
     const link = (app.status && app.status.link) || {};
     const st = app.status && app.status.speedtest;
-    const usb = link.usb_label || (link.bus === "usb" ? "Not reported by the OS (run a speed test)" : null);
     const ids = link.vendor_id && link.product_id ? ` (${link.vendor_id}:${link.product_id})` : "";
     const facts = [
-      ["Adapter", (link.chip || link.description || "Unknown") + ids],
+      ["Bridge chip", (link.chip || "Unknown") + ids],
       ["Connection", link.connection],
-      ["Interface", [link.interface, link.local_ip].filter(Boolean).join(" · ")],
-      ["USB link", usb],
-      ["Ethernet link", link.link_down ? "No link" : fmtMbps(link.link_mbps) || "Unknown"],
-      ["Adapter rated", link.adapter_max_mbps ? `${fmtMbps(link.adapter_max_mbps)} Ethernet` +
-        (link.adapter_usb_mbps ? ` over ${link.adapter_usb_mbps <= 480 ? "USB 2.0" : "USB 3"}` : "") : null],
-      ["PS5 port", "1 Gbps Ethernet (built in)"],
-      ["Best case", `${fmtRate(link.expected_mbs)}  ·  ~${((link.expected_mbs || 0) * 60 / 1024).toFixed(1)} GB per minute`],
+      ["Bridge rated", link.chip_mbps ? (link.chip_mbps > 480 ? "USB 3 (5 Gbps)" : "USB 2.0 (480 Mbps)") : null],
+      ["This PC's port", link.usb_label || "Not reported (run a speed test)"],
+      ["Cable ends", "USB-C or USB-A, any combination (not detectable, and it doesn't change the speed)"],
+      ["PS5 port", "Rear USB-A (USB-A end) or SuperSpeed front USB-C (USB-C end)"],
+      ["Best case", link.expected_mbs ? `${fmtRate(link.expected_mbs)}  ·  ~${(link.expected_mbs * 60 / 1024).toFixed(1)} GB per minute` : null],
     ].filter(([, v]) => v);
     const dl = el("dl", { class: "facts" }, facts.flatMap(([k, v]) =>
       [el("dt", {}, k), el("dd", { class: k === "Best case" ? "hl" : null }, v)]));
@@ -1102,11 +1170,13 @@ function openCablePanel() {
         el("span", {}, "Download ", el("b", {}, fmtRate(st.down_mbs))),
         el("span", { style: "color:#8b95a7; align-self:end" }, `at ${new Date(st.at * 1000).toLocaleTimeString()}`)),
       el("ul", { class: "notes " + st.verdict }, st.notes.map((n) => el("li", {}, n)))) : null;
-    body.replaceChildren(dl, bars, notes || "", result || "");
+    const guide = el("details", {}, el("summary", {}, "Which ports for USB-C ⇄ USB-C, USB-A ⇄ USB-C and USB-A ⇄ USB-A cables"),
+      cableGuide());
+    body.replaceChildren(dl, bars, notes || "", result || "", guide);
     runBtn.disabled = running || !app.connected;
     runBtn.textContent = running ? "Testing… (about 6 s)" : st ? "Run again" : "Run speed test";
     runBtn.title = app.connected ? "Sends and receives test data in memory; nothing is written to the PS5"
-                                 : "Connect to the PS5 first";
+                                 : "The PS5 is not connected";
   };
 
   runBtn.addEventListener("click", async () => {
@@ -1164,40 +1234,6 @@ function openGameFolders(anchor) {
   setTimeout(() => document.addEventListener("click", function off(e) {
     if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", off); }
   }), 0);
-}
-
-async function connect(host) {
-  const btn = $("btn-connect");
-  btn.disabled = true;
-  try {
-    const st = await api("POST", "/api/connect", host ? { host } : {});
-    if (host || !app.settings) app.settings = (await api("GET", "/api/state")).settings;
-    applyStatus(st);
-    if (!st.connected && host) toast(`${LINK_TEXT[st.state][0]}: ${linkSubtitle(st)}`, "err");
-  } catch (e) { toast(e.message, "err"); }
-  finally { btn.disabled = false; }
-}
-
-async function sendPayload() {
-  toast("Sending payload to the PS5 ELF loader…");
-  try {
-    applyStatus(await api("POST", "/api/send-payload", {}));
-    toast("Payload running", "ok");
-  } catch (e) { toast(e.message, "err"); }
-}
-
-async function findPs5() {
-  toast("Searching the cable for a PS5…");
-  try {
-    const { found } = await api("POST", "/api/discover", {});
-    if (!found.length) { toast("No PS5 answered. Send the payload first, or type the IP.", "err"); return; }
-    if (found.length === 1) { $("host").value = found[0].host; connect(found[0].host); return; }
-    let pick = null;
-    const list = el("div", { class: "found" }, found.map((f) => el("button", { onclick: () => { pick = f.host; document.querySelector(".modal .primary").click(); } },
-      el("code", {}, f.host), el("small", {}, f.banner))));
-    await modal({ title: "Several consoles found", extra: list, okText: "Close" });
-    if (pick) { $("host").value = pick; connect(pick); }
-  } catch (e) { toast(e.message, "err"); }
 }
 
 // ---------------------------------------------------------------- convert
@@ -1461,7 +1497,7 @@ function cvRenderQueue() {
     el("div", { class: "row-flex" },
       el("button", { class: "primary", onclick: cvStart, disabled: !cv.source.trim() }, running ? `Add to queue: ${startLabel}` : startLabel),
       el("button", { class: "ghost", onclick: async () => { app.cvJobs = (await api("POST", "/api/convert/clear", {})).jobs; cvRenderQueue(); } }, "Clear finished")),
-    app.cvConverter === "" ? el("div", { class: "err-text" }, "The converter (ps5cable-convert) is missing next to the app, so nothing can be converted.") : null,
+    app.cvConverter === "" ? el("div", { class: "err-text" }, "The converter is missing next to the app, so nothing can be converted.") : null,
     el("div", { class: "hint" }, "Conversions run one at a time on this PC; the PS5 doesn't need to be connected until you send the result."));
   const list = jobs.map((j) => {
     const name = (j.source || "").split(/[\\/]/).filter(Boolean).pop();
@@ -1597,26 +1633,23 @@ async function pollJobs() {
 async function boot() {
   const st = await api("GET", "/api/state");
   app.settings = st.settings;
-  $("host").value = st.settings.host;
+  app.os = st.os;
+  app.payloadPath = st.payload;
+  app.usbGuide = st.usb_guide;
+  app.canInstallDriver = st.can_install_driver;
   $("opt-resume").checked = !!st.settings.resume;
   $("opt-jobs").value = st.settings.jobs;
-  $("opt-auto").checked = !!st.settings.auto_payload;
   local.places = st.local_places;
   remote.places = [{ name: "Internal", path: "/data" }, { name: "Homebrew", path: "/data/homebrew" }];
-  if (!st.payload) $("btn-payload").title = "ps5cable.elf not found next to the app";
   local.load(st.settings.local_dir);
   remote.renderPlaces();
   applyStatus(st.status);
   pollJobs();
 }
 
-$("btn-connect").addEventListener("click", () => connect($("host").value.trim()));
-$("host").addEventListener("keydown", (e) => { if (e.key === "Enter") connect($("host").value.trim()); });
-$("btn-find").addEventListener("click", findPs5);
 $("btn-convert").addEventListener("click", () => openConvert());
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("cv-bg") && !document.querySelector(".modal-bg")) closeConvert(); });
 $("cable").addEventListener("click", openCablePanel);
-$("btn-payload").addEventListener("click", sendPayload);
 $("btn-upload").addEventListener("click", () => startTransfer("upload"));
 $("btn-download").addEventListener("click", () => startTransfer("download"));
 $("btn-clear").addEventListener("click", async () => { app.jobs = (await api("POST", "/api/jobs/clear", {})).jobs; renderJobs(); });
@@ -1624,11 +1657,10 @@ $("btn-collapse").addEventListener("click", () => $("transfers").classList.toggl
 $("btn-quit").addEventListener("click", async () => {
   if (app.jobs.some((j) => j.state === "running") && !(await modal({ title: "Quit while transfers are running?", okText: "Quit", danger: true }))) return;
   await api("POST", "/api/quit", {}).catch(() => {});
-  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b95a7">ps5cable Hub closed. You can close this window.</div>';
+  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b95a7">PS5 Cable closed. You can close this window.</div>';
 });
 $("opt-resume").addEventListener("change", (e) => api("POST", "/api/settings", { resume: e.target.checked }));
 $("opt-jobs").addEventListener("change", (e) => api("POST", "/api/settings", { jobs: Number(e.target.value) || 4 }));
-$("opt-auto").addEventListener("change", (e) => api("POST", "/api/settings", { auto_payload: e.target.checked }));
 $("opt-hidden").addEventListener("change", (e) => { app.showHidden = e.target.checked; local.renderList(); remote.renderList(); });
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || document.querySelector(".modal-bg, .cv-bg")) return;

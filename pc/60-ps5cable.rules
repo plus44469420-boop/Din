@@ -1,0 +1,5 @@
+# ps5cable: let the logged-in user open USB bridge (data link) cables.
+# Install: sudo cp 60-ps5cable.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+# then unplug and replug the cable.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="27a1", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="25a1", MODE="0660", TAG+="uaccess"

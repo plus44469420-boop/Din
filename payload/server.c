@@ -2,7 +2,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
@@ -21,6 +20,7 @@
 
 #include "platform.h"
 #include "proto.h"
+#include "usblink.h"
 
 #ifndef VERSION_TAG
 #define VERSION_TAG "dev"
@@ -208,14 +208,15 @@ rm_rf(const char *path) {
   return rmdir(path);
 }
 
+static const char version[] = "PS5 Cable " VERSION_TAG
+#ifdef __PROSPERO__
+  " (ps5)";
+#else
+  " (host)";
+#endif
+
 static int
 handle_ping(int fd) {
-  static const char version[] = "ps5cable " VERSION_TAG
-#ifdef __PROSPERO__
-    " (ps5)";
-#else
-    " (host)";
-#endif
   size_t len = sizeof version - 1;
 
   if(send_res(fd, 0, 0, P5CX_PROTO_VER, len)) {
@@ -544,6 +545,22 @@ handle_du(int fd, const char *path) {
   return send_res(fd, 0, du.dirs, du.bytes, du.files);
 }
 
+/* One toast per burst, so a folder of files doesn't fill the screen. */
+static void
+note_transfer(const char *verb, const char *path) {
+  static time_t last;
+  const char *base = strrchr(path, '/');
+  time_t now = time(NULL);
+
+  base = base && base[1] ? base + 1 : path;
+  if(now - last < 8) {
+    plat_log("transfer: %s %s", verb, path);
+    return;
+  }
+  last = now;
+  plat_notify("PS5 Cable: %s %s", verb, base);
+}
+
 static int
 handle_put(int fd, const char *path, uint8_t flags, uint64_t total,
            uint64_t offset, uint8_t *buf) {
@@ -582,6 +599,7 @@ handle_put(int fd, const char *path, uint8_t flags, uint64_t total,
     close(file);
     return -1;
   }
+  note_transfer("PC to PS5,", path);
 
   remaining = total - offset;
   while(remaining) {
@@ -650,6 +668,7 @@ handle_get(int fd, const char *path, uint64_t offset, uint8_t *buf) {
     close(file);
     return -1;
   }
+  note_transfer("PS5 to PC,", path);
 
   while(remaining) {
     size_t want = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;
@@ -801,7 +820,7 @@ client_thread(void *arg) {
     case CMD_DU:       rc = handle_du(fd, path); break;
     case CMD_SHUTDOWN:
       send_ok(fd);
-      plat_notify("ps5cable stopped");
+      plat_notify("PS5 Cable stopped");
       exit(EXIT_SUCCESS);
     default:
       rc = send_err(fd, "unknown command %u", req.cmd);
@@ -817,91 +836,7 @@ client_thread(void *arg) {
   return NULL;
 }
 
-/* Answers "P5CX?" broadcasts so the PC client can find the console on a
- * direct cable without the user typing an IP. */
-static void *
-discovery_thread(void *arg) {
-  uint16_t port = (uint16_t)(intptr_t)arg;
-  struct sockaddr_in addr = {0};
-  int fd;
-
-  if((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-    plat_log("discovery: socket: %s", strerror(errno));
-    return NULL;
-  }
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(port);
-  if(bind(fd, (struct sockaddr *)&addr, sizeof addr)) {
-    plat_log("discovery: bind: %s", strerror(errno));
-    close(fd);
-    return NULL;
-  }
-
-  for(;;) {
-    struct sockaddr_in peer;
-    socklen_t peerlen = sizeof peer;
-    char msg[64];
-    ssize_t n = recvfrom(fd, msg, sizeof msg, 0, (struct sockaddr *)&peer,
-                         &peerlen);
-
-    if(n == 5 && !memcmp(msg, "P5CX?", 5)) {
-      int len = snprintf(msg, sizeof msg, "P5CX! %u %s", port, VERSION_TAG);
-      sendto(fd, msg, (size_t)len, 0, (struct sockaddr *)&peer, peerlen);
-    }
-  }
-  return NULL;
-}
-
-/* Returns the number of non-loopback IPv4 addresses and optionally announces
- * them on screen. */
-static int
-announce_addresses(uint16_t port, int notify) {
-  struct ifaddrs *ifaddr;
-  char ip[INET_ADDRSTRLEN];
-  int count = 0;
-
-  if(getifaddrs(&ifaddr)) {
-    return 0;
-  }
-  for(struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
-    if(!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET ||
-       !strncmp(ifa->ifa_name, "lo", 2)) {
-      continue;
-    }
-    inet_ntop(AF_INET, &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr, ip,
-              sizeof ip);
-    if(!strncmp(ip, "0.", 2)) {
-      continue;
-    }
-    if(notify) {
-      plat_notify("ps5cable ready on %s:%u (%s)", ip, port, ifa->ifa_name);
-    }
-    count++;
-  }
-  freeifaddrs(ifaddr);
-  return count;
-}
-
 static int g_notify = 1;
-
-/* Puts "PC connected" on the TV when a computer starts talking to us, but
- * not for every one of the many short connections a client makes. */
-static void
-note_peer(const struct sockaddr_in *peer) {
-  static uint32_t last_ip;
-  static time_t last_seen;
-  time_t now = time(NULL);
-  char ip[INET_ADDRSTRLEN];
-
-  if(g_notify && (peer->sin_addr.s_addr != last_ip || now - last_seen > 600)) {
-    inet_ntop(AF_INET, &peer->sin_addr, ip, sizeof ip);
-    plat_notify("ps5cable: PC connected (%s)", ip);
-  }
-  last_ip = peer->sin_addr.s_addr;
-  last_seen = now;
-}
 
 static int
 serve(uint16_t port) {
@@ -914,7 +849,9 @@ serve(uint16_t port) {
   }
   setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
   addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  /* Only the USB link (usblink.c) connects, over loopback; nothing on the
+   * console's network can reach the file server. */
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons(port);
 
   if(bind(srv, (struct sockaddr *)&addr, sizeof addr)) {
@@ -930,19 +867,16 @@ serve(uint16_t port) {
 
   for(;;) {
     int bufsize = SOCK_BUF_SIZE, one = 1;
-    struct sockaddr_in peer;
-    socklen_t peerlen = sizeof peer;
     pthread_t thr;
     int conn;
 
-    if((conn = accept(srv, (struct sockaddr *)&peer, &peerlen)) < 0) {
+    if((conn = accept(srv, NULL, NULL)) < 0) {
       if(errno == EINTR) {
         continue;
       }
       plat_log("accept: %s", strerror(errno));
       break;
     }
-    note_peer(&peer);
     setsockopt(conn, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof bufsize);
     setsockopt(conn, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof bufsize);
     setsockopt(conn, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
@@ -962,10 +896,10 @@ serve(uint16_t port) {
 int
 main(int argc, char *argv[]) {
   uint16_t port = P5CX_PORT;
-  pthread_t thr;
+  const char *cable = NULL;
   int c;
 
-  while((c = getopt(argc, argv, "p:qh")) != -1) {
+  while((c = getopt(argc, argv, "p:qC:h")) != -1) {
     switch(c) {
     case 'p':
       port = (uint16_t)atoi(optarg);
@@ -973,10 +907,14 @@ main(int argc, char *argv[]) {
     case 'q':
       g_notify = 0;
       break;
+    case 'C':
+      cable = optarg;
+      break;
     default:
-      printf("usage: %s [-p PORT] [-q]\n", argv[0]);
-      printf("  -p PORT  TCP+UDP port to listen on (default %d)\n", P5CX_PORT);
-      printf("  -q       no on-screen notifications\n");
+      printf("usage: %s [-p PORT] [-q] [-C HOST:PORT]\n", argv[0]);
+      printf("  -p PORT       file server port on 127.0.0.1 (default %d)\n", P5CX_PORT);
+      printf("  -q            no on-screen notifications\n");
+      printf("  -C HOST:PORT  desktop build: use the fake USB cable at HOST:PORT\n");
       return EXIT_FAILURE;
     }
   }
@@ -986,15 +924,9 @@ main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  /* With a direct cable the link may come up after the payload starts, so
-   * wait for an address instead of exiting. */
-  while(!announce_addresses(port, 0)) {
-    sleep(2);
-  }
-  announce_addresses(port, g_notify);
-
-  if(!pthread_create(&thr, NULL, discovery_thread, (void *)(intptr_t)port)) {
-    pthread_detach(thr);
+  usb_start(port, version, cable);
+  if(g_notify) {
+    plat_notify("PS5 Cable ready: connect the USB bridge cable (USB-C or USB-A) to the PC");
   }
 
   for(;;) {
