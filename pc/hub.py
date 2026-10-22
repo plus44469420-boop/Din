@@ -644,7 +644,10 @@ def api_refresh(hub, args):
 def api_usb_rescan(hub, args):
     """Tries the cable again right away and lists every USB device the PC sees."""
     hub.link.rescan(wait=1.5)
-    return {"status": hub.refresh_status(), "usb": hub.link.scan_devices()}
+    usb = hub.link.scan_devices()
+    if windriver.supported():
+        usb["devices"] = windriver.supplement(usb["devices"], windriver.list_devices())
+    return {"status": hub.refresh_status(), "usb": usb}
 
 
 def api_usb_install_driver(hub, args):

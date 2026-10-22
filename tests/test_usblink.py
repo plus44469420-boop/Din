@@ -191,8 +191,9 @@ class FakeUtil:
         return next((e for e in intf if custom_match(e)), None)
 
     def claim_interface(self, dev, i):
-        if self.claim_error:
-            raise self.claim_error
+        err = getattr(dev, "claim_error", None) or self.claim_error
+        if err:
+            raise err
         self.claimed.append(i)
 
     def release_interface(self, dev, i):
@@ -242,6 +243,13 @@ class PyUsbBackendTest(unittest.TestCase):
         with self.assertRaises(usblink.NoAccess) as cm:
             self.backend([FakeDevice()], util).open()
         self.assertIn("PL27A1", str(cm.exception))
+
+    def test_skips_a_part_of_the_cable_it_cannot_open(self):
+        bad = FakeDevice()
+        bad.claim_error = NotImplementedError("the composite parent has no WinUSB driver")
+        good = FakeDevice()
+        tr = self.backend([bad, good]).open()
+        self.assertIs(tr.dev, good)
 
     def test_windows_cable_without_winusb_needs_the_driver(self):
         util = FakeUtil(claim_error=NotImplementedError("Operation not supported"))
@@ -421,6 +429,31 @@ class FakeConn:
         if p not in self.files:
             raise ps5cable.RemoteError("missing")
         return self.files[p]
+
+
+class TransferNoticeTest(unittest.TestCase):
+    def test_payload_announces_a_transfer_on_its_console(self):
+        build_payload()
+        cable = free_port()
+        proc = subprocess.Popen(
+            [str(HOST_SERVER), "-p", str(free_port()), "-C", f"127.0.0.1:{cable}"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        link = usblink.Tunnel(usblink.FakeCableBackend(f"127.0.0.1:{cable}")).start()
+        try:
+            self.assertTrue(link.wait(10), link.detail)
+            with tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / "hello.bin"
+                src.write_bytes(b"hello")
+                with ps5cable.Connection("127.0.0.1", link.port, timeout=5) as conn:
+                    conn.put_file(str(src), "/tmp/ps5cable-notice-hello.bin")
+            os.remove("/tmp/ps5cable-notice-hello.bin")
+        finally:
+            link.stop()
+            proc.kill()
+            out = proc.stdout.read()
+            proc.stdout.close()
+            proc.wait(timeout=5)
+        self.assertIn("PC to PS5, ps5cable-notice-hello.bin", out)
 
 
 class GameFolderTest(unittest.TestCase):

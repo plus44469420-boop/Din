@@ -43,6 +43,7 @@ LINK_TIMEOUT = 6.0
 # vendor, product -> chip name, nominal USB speed in Mbps (payload/usblink.h).
 BRIDGES = {
     (0x067B, 0x27A1): ("Prolific PL27A1", 5000),
+    (0x067B, 0x27A7): ("Prolific PL27A1", 5000),  # same chip, "custom transfer" firmware
     (0x067B, 0x25A1): ("Prolific PL25A1", 480),
 }
 # Prolific "QuickLink" reset: flush both directions, mark this side present.
@@ -204,53 +205,94 @@ class PyUsbBackend:
                                        getattr(d, "speed", None)))
         return sorted(out, key=lambda r: not r["bridge"])
 
-    def open(self):
-        core, util, backend = self._load()
-        devs = self._find(custom_match=lambda d: (d.idVendor, d.idProduct) in BRIDGES)
-        if not devs:
-            raise NoDevice("No USB bridge cable found.")
-        dev = devs[0]
+    def _open_one(self, dev):
+        """Opens one candidate. A bridge cable is usually composite: the parent
+        stays a USB hub-like device and only interface 0 is the bridge, so a
+        candidate that won't open is skipped by open()."""
+        core, util, _ = self._load()
         chip, chip_mbps = BRIDGES[(dev.idVendor, dev.idProduct)]
         try:
-            try:
-                if dev.is_kernel_driver_active(0):
-                    dev.detach_kernel_driver(0)
-            except (NotImplementedError, core.USBError):
-                pass
             try:
                 cfg = dev.get_active_configuration()
             except core.USBError:
                 dev.set_configuration()
                 cfg = dev.get_active_configuration()
-            intf = cfg[(0, 0)]
-            util.claim_interface(dev, 0)
         except (core.USBError, NotImplementedError) as e:
             util.dispose_resources(dev)
-            # libusb's "not supported" on Windows: the device isn't on WinUSB.
-            if os.name == "nt" and (isinstance(e, NotImplementedError)
-                                    or getattr(e, "backend_error_code", None) == -12):
-                raise NoDriver(f"Found a {chip} cable. It needs the USB driver, once: click "
-                               "Install driver and OK the Windows prompt.")
-            raise NoAccess(f"Found a {chip} cable but could not open it ({e}). {_access_hint()}")
+            return self._open_error(chip, e)
 
-        def bulk(direction):
-            return util.find_descriptor(
-                intf, custom_match=lambda ep: util.endpoint_direction(ep.bEndpointAddress) == direction
-                and util.endpoint_type(ep.bmAttributes) == util.ENDPOINT_TYPE_BULK)
+        if isinstance(cfg, dict):  # the tests hand back {(number, alt): endpoints}
+            ifaces = [(key[0] if isinstance(key, tuple) else 0, 0xFF, eps)
+                      for key, eps in cfg.items()]
+        else:
+            ifaces = [(intf.bInterfaceNumber, getattr(intf, "bInterfaceClass", 0xFF), intf)
+                      for intf in cfg]
+        # The mass-storage part (the cable's "easy transfer" drive) also has
+        # bulk endpoints. The bridge is the other one.
+        ifaces.sort(key=lambda item: (item[1] == 0x08, item[0]))
+        last = None
+        for num, kind, eps in ifaces:
+            if kind == 0x08:
+                continue
+            try:
+                try:
+                    if dev.is_kernel_driver_active(num):
+                        dev.detach_kernel_driver(num)
+                except (NotImplementedError, core.USBError):
+                    pass
+                util.claim_interface(dev, num)
+            except (core.USBError, NotImplementedError) as e:
+                last = e
+                continue
 
-        ep_in, ep_out = bulk(util.ENDPOINT_IN), bulk(util.ENDPOINT_OUT)
-        if ep_in is None or ep_out is None:
-            util.dispose_resources(dev)
-            raise NoAccess(f"The {chip} cable has no bulk endpoints; it may be in its "
-                           "mass-storage (\"Easy Transfer\") mode. Replug it.")
-        try:
-            dev.ctrl_transfer(0xC0, PL_SET_FEATURE, PL_RESET, 0, 0, timeout=1000)
-        except core.USBError:
-            pass
-        info = {"chip": chip, "chip_mbps": chip_mbps,
-                "vendor_id": f"{dev.idVendor:04x}", "product_id": f"{dev.idProduct:04x}",
-                "usb_mbps": USB_SPEED_MBPS.get(getattr(dev, "speed", None))}
-        return PyUsbTransport(core, util, dev, ep_in, ep_out, info)
+            def bulk(direction, eps=eps):
+                return util.find_descriptor(
+                    eps, custom_match=lambda ep: util.endpoint_direction(ep.bEndpointAddress) == direction
+                    and util.endpoint_type(ep.bmAttributes) == util.ENDPOINT_TYPE_BULK)
+
+            ep_in, ep_out = bulk(util.ENDPOINT_IN), bulk(util.ENDPOINT_OUT)
+            if ep_in is not None and ep_out is not None:
+                try:
+                    dev.ctrl_transfer(0xC0, PL_SET_FEATURE, PL_RESET, 0, 0, timeout=1000)
+                except core.USBError:
+                    pass
+                info = {"chip": chip, "chip_mbps": chip_mbps,
+                        "vendor_id": f"{dev.idVendor:04x}", "product_id": f"{dev.idProduct:04x}",
+                        "usb_mbps": USB_SPEED_MBPS.get(getattr(dev, "speed", None))}
+                return PyUsbTransport(core, util, dev, ep_in, ep_out, info)
+            try:
+                util.release_interface(dev, num)
+            except Exception:
+                pass
+        util.dispose_resources(dev)
+        if last is not None:
+            return self._open_error(chip, last)
+        raise NoAccess(f"The {chip} cable has no bulk endpoints; it may be in its "
+                       "mass-storage (\"Easy Transfer\") mode. Replug it.")
+
+    @staticmethod
+    def _open_error(chip, err):
+        # libusb's "not supported" on Windows: this part of the cable isn't on WinUSB.
+        if os.name == "nt" and (isinstance(err, NotImplementedError)
+                                or getattr(err, "backend_error_code", None) == -12):
+            raise NoDriver(f"Found a {chip} cable. It needs the USB driver, once: click "
+                           "Install driver and OK the Windows prompt.")
+        raise NoAccess(f"Found a {chip} cable but could not open it ({err}). {_access_hint()}")
+
+    def open(self):
+        devs = self._find(custom_match=lambda d: (d.idVendor, d.idProduct) in BRIDGES)
+        if not devs:
+            raise NoDevice("No USB bridge cable found.")
+        errors = []
+        for dev in devs:
+            try:
+                return self._open_one(dev)
+            except (NoDriver, NoAccess) as e:
+                errors.append(e)
+        for err in errors:
+            if isinstance(err, NoDriver):
+                raise err
+        raise errors[-1]
 
 
 class PyUsbTransport:
@@ -436,8 +478,10 @@ def interpret_speedtest(info, up_mbs, down_mbs):
 STATE_TEXT = {
     "starting": "Looking for the USB bridge cable...",
     "no_backend": "USB support is missing.",
-    "no_cable": "No USB bridge cable found. Plug a USB bridge (data link) cable "
-                "between this PC and the PS5: USB-C or USB-A ends both work.",
+    "no_cable": "No USB bridge cable found. A normal USB-C to USB-C cable cannot connect "
+                "the PS5 to this PC: both are USB hosts, so that cable never shows up. "
+                "It has to be a bridge (data link) cable with a chip in the middle, "
+                "such as the Prolific PL27A1.",
     "no_access": "The USB bridge cable cannot be opened.",
     "no_driver": "The USB bridge cable needs the USB driver: click Install driver.",
     "waiting": "Bridge cable found. Waiting for the PS5 Cable payload on the PS5; "
@@ -570,7 +614,16 @@ class Tunnel:
                 tr = self.backend.open()
             except NoDevice:
                 self.info = {}
-                self._set("no_cable")
+                # libusb only sees a cable Windows has given a WinUSB driver.
+                # SetupAPI can still see one whose driver Windows stopped.
+                detail = None
+                if os.name == "nt":
+                    try:
+                        import windriver
+                        detail = windriver.bridge_problem(windriver.list_devices())
+                    except Exception:
+                        detail = None
+                self._set("no_driver" if detail else "no_cable", detail)
                 if not isinstance(self.backend, FakeCableBackend):
                     self._pause(1)
                 continue

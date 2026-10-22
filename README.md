@@ -60,7 +60,7 @@ You can also build everything yourself, as described in Building below.
 
 ### 2. PC: let the app open the cable
 
-- **Windows:** the cable needs Windows' own **WinUSB** driver, once, and the app installs it: plug the cable into the PC, click **Install driver** on the PS5 side of the app, and OK the Windows admin prompt. No Zadig needed. The app does what Zadig does: it writes a small driver file that points the cable (USB ID 067B 27A1 or 067B 25A1) at WinUSB, which is part of Windows; signs it with a certificate made on your PC just for this, whose private key is deleted straight after so it can't sign anything else; and puts it on the cable, replacing any driver that came with the cable's transfer software. **Rescan USB** lists every USB device the PC sees, so you can check the cable shows up. If it doesn't, the cable may be showing its built-in "transfer software" drive instead: some cables have a mode switch, or need that software ejected first.
+- **Windows:** the cable needs Windows' own **WinUSB** driver, once, and the app installs it: plug the cable into the PC, click **Install driver** on the PS5 side of the app, and OK the Windows admin prompt. No Zadig needed. The driver goes on the **bridge part** of the cable only. These cables are two devices in one (the bridge, plus a small "easy transfer" drive), and a driver on the whole device makes Windows stop the cable. If an older build already did that, click **Install driver** again: it removes that driver and puts it on the bridge part. Then unplug the cable and plug it back in. **Rescan USB** lists every USB device the PC sees. A normal USB-C to USB-C cable never appears in that list.
 - **Linux:** run `sudo cp app/60-ps5cable.rules /etc/udev/rules.d/ && sudo udevadm control --reload`, then replug the cable. The app detaches the kernel's `plusb` network driver from the cable by itself.
 - **macOS:** nothing to install.
 
@@ -213,8 +213,8 @@ Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publ
 
 ## Troubleshooting
 
-- **"No USB bridge cable found".** The PC doesn't see a PL27A1/PL25A1 cable. Click **Rescan USB** to list every USB device the PC sees; if the cable isn't among them, try another port. A plain USB-C or USB-A cable doesn't show up at all (see "The cable" above).
-- **"Cable needs a driver" (Windows).** Click **Install driver** and OK the admin prompt (setup step 2). If Windows asks for a restart afterwards, restart.
+- **"No USB bridge cable found", including with a USB-C to USB-C cable.** Click **Rescan USB**. A plain USB-C cable connects two USB hosts, so it never appears in that list and cannot work (see "The cable" above). If the cable is a bridge and it isn't listed, try another port: on the PS5 a rear USB-A port or the SuperSpeed front USB-C port, and on the PC a USB-C port with data or a blue USB-A port.
+- **"Cable needs a driver" or Windows said the driver installed and then stopped.** Click **Install driver** and OK the admin prompt (setup step 2). That repairs a driver that was put on the whole cable, which is what makes Windows stop a USB-C bridge cable. Unplug the cable and plug it back in afterwards. If Windows asks for a restart, restart.
 - **"No permission to open the cable" (Linux).** Install the udev rule (setup step 2) and replug, or run as root.
 - **"USB cable found", but it never turns green.** The PS5 isn't answering: load `ps5cable.elf` on the PS5, check the cable is in the PS5, and watch the PS5's notifications. Unplugging and replugging the PS5 end makes the payload look for the cable again.
 - **About 35 MB/s.** One end is on USB 2.0. Move the PS5 end to a rear USB-A port or the SuperSpeed front USB-C port, and plug the PC end straight into a USB-C port or a blue USB 3 USB-A port. The cable panel's port table lists the right ports for each cable type.

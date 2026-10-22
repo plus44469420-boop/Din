@@ -545,6 +545,22 @@ handle_du(int fd, const char *path) {
   return send_res(fd, 0, du.dirs, du.bytes, du.files);
 }
 
+/* One toast per burst, so a folder of files doesn't fill the screen. */
+static void
+note_transfer(const char *verb, const char *path) {
+  static time_t last;
+  const char *base = strrchr(path, '/');
+  time_t now = time(NULL);
+
+  base = base && base[1] ? base + 1 : path;
+  if(now - last < 8) {
+    plat_log("transfer: %s %s", verb, path);
+    return;
+  }
+  last = now;
+  plat_notify("PS5 Cable: %s %s", verb, base);
+}
+
 static int
 handle_put(int fd, const char *path, uint8_t flags, uint64_t total,
            uint64_t offset, uint8_t *buf) {
@@ -583,6 +599,7 @@ handle_put(int fd, const char *path, uint8_t flags, uint64_t total,
     close(file);
     return -1;
   }
+  note_transfer("PC to PS5,", path);
 
   remaining = total - offset;
   while(remaining) {
@@ -651,6 +668,7 @@ handle_get(int fd, const char *path, uint64_t offset, uint8_t *buf) {
     close(file);
     return -1;
   }
+  note_transfer("PS5 to PC,", path);
 
   while(remaining) {
     size_t want = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;

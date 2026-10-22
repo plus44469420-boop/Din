@@ -1065,7 +1065,8 @@ function linkSubtitle(st) {
     case "no_access": return app.os === "nt" ? "Another program may be using the cable" : "No permission to open the cable";
     case "no_backend": return "Install pyusb and libusb";
     case "starting": return "Looking for the USB cable…";
-    default: return "Plug in the USB bridge cable (USB-C or USB-A)";
+    case "no_cable": return "A normal USB-C cable will not show up";
+    default: return "Plug in a USB bridge cable (USB-C or USB-A ends)";
   }
 }
 

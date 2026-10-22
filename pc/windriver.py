@@ -16,6 +16,7 @@ import base64
 import ctypes
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,23 +45,102 @@ def supported():
     return os.name == "nt"
 
 
-def hardware_ids():
-    """Every ID the cable can show up as: whole device, or interface 0 if composite."""
-    ids = []
-    for vid, pid in usblink.BRIDGES:
-        ids += [f"USB\\VID_{vid:04X}&PID_{pid:04X}", f"USB\\VID_{vid:04X}&PID_{pid:04X}&MI_00"]
-    return ids
+_HWID = re.compile(r"USB\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})(?:&MI_(\d+))?", re.I)
 
 
-def make_inf(date=None):
+def parse_hwid(hwid):
+    """(vid, pid, interface or None) for a USB hardware id, else None."""
+    match = _HWID.match(hwid or "")
+    if not match:
+        return None
+    vid, pid, mi = int(match.group(1), 16), int(match.group(2), 16), match.group(3)
+    return vid, pid, (int(mi) if mi is not None else None)
+
+
+def bridge_nodes(devices):
+    """The plugged-in devices that are one of the bridge chips."""
+    out = []
+    for dev in devices:
+        for hwid in dev.get("hwids") or []:
+            parsed = parse_hwid(hwid)
+            if parsed and (parsed[0], parsed[1]) in usblink.BRIDGES:
+                out.append({**dev, "vid": parsed[0], "pid": parsed[1], "mi": parsed[2], "hwid": hwid})
+                break
+    return out
+
+
+def default_hwids():
+    """The bridge interface only. Matching the whole device replaces Windows'
+    composite driver and the cable stops enumerating."""
+    return [f"USB\\VID_{vid:04X}&PID_{pid:04X}&MI_00" for vid, pid in sorted(usblink.BRIDGES)]
+
+
+def inf_hwids(devices):
+    """WinUSB goes on the bridge interface (MI_00) only. Matching the whole
+    device replaces usbccgp, and Windows then stops a USB-C cable."""
+    pids = sorted({n["pid"] for n in bridge_nodes(devices)})
+    if not pids:
+        return default_hwids()
+    return [f"USB\\VID_067B&PID_{pid:04X}&MI_00" for pid in pids]
+
+
+def bridge_problem(devices):
+    """Why Windows can see the cable but this app cannot, or None."""
+    nodes = bridge_nodes(devices)
+    if not nodes:
+        return None
+    chip = usblink.BRIDGES[(nodes[0]["vid"], nodes[0]["pid"])][0]
+    stopped = [n for n in nodes if n.get("problem")]
+    if stopped:
+        return (f"Windows sees the USB cable ({chip}) but stopped its driver "
+                f"(problem {stopped[0]['problem']}). Click Install driver to repair it, "
+                "then unplug the cable and plug it back in.")
+    parents = [n for n in nodes if n["mi"] is None]
+    bridge = [n for n in nodes if n["mi"] == 0]
+    if any((n.get("service") or "").upper() == "WINUSB" for n in parents):
+        return ("Windows sees the USB cable, but the driver was installed on the whole "
+                "device and that stops a USB-C cable. Click Install driver to repair it, "
+                "then unplug the cable and plug it back in.")
+    if bridge and any((n.get("service") or "").upper() not in ("WINUSB", "LIBUSBK", "LIBUSB0")
+                      for n in bridge):
+        return ("Windows sees the USB cable, but the bridge part of it has no driver. "
+                "Click Install driver.")
+    if parents and not bridge and (parents[0].get("service") or "").upper() in ("USBCCGP", ""):
+        return ("Windows sees the USB cable but not the bridge part yet. Unplug it, "
+                "plug it back in, then click Install driver.")
+    return None
+
+
+def supplement(rows, devices):
+    """Adds bridge cables Windows sees but libusb doesn't (no WinUSB driver yet)."""
+    have = {row["id"] for row in rows if row.get("bridge")}
+    extra = []
+    for node in bridge_nodes(devices):
+        ident = f"{node['vid']:04x}:{node['pid']:04x}"
+        if ident in have:
+            continue
+        have.add(ident)
+        kind = "USB bridge cable (works with PS5 Cable)"
+        if node.get("problem"):
+            kind += f" · driver stopped (problem {node['problem']})"
+        elif node["mi"] is None and (node.get("service") or "").upper() == "WINUSB":
+            kind += " · driver is on the wrong part of the cable"
+        extra.append({"id": ident, "name": node.get("name") or usblink.BRIDGES[(node["vid"], node["pid"])][0],
+                      "kind": kind, "bridge": True, "speed": None})
+    return extra + rows
+
+
+def make_inf(date=None, hwids=None):
     date = date or time.strftime("%m/%d/%Y")
-    models = []
-    for hwid in hardware_ids():
-        vid, pid = hwid[4:].split("&")[:2]
-        chip = usblink.BRIDGES[(int(vid[4:], 16), int(pid[4:], 16))][0].split()[-1]
-        models.append(f"%{chip}% = Install, {hwid}")
-    strings = [f'{name.split()[-1]} = "PS5 Cable: {name} USB bridge"'
-               for name, _ in usblink.BRIDGES.values()]
+    hwids = list(hwids or default_hwids())
+    models, tokens = [], []
+    for hwid in hwids:
+        vid, pid, _ = parse_hwid(hwid)
+        token = usblink.BRIDGES[(vid, pid)][0].split()[-1]
+        models.append(f"%{token}% = Install, {hwid}")
+        if token not in tokens:
+            tokens.append((token, usblink.BRIDGES[(vid, pid)][0]))
+    strings = [f'{token} = "PS5 Cable: {name} USB bridge"' for token, name in tokens]
     sections = []
     for arch in ("NTamd64", "NTx86", "NTarm64"):
         sections += [f"[Cable.{arch}]", *models, ""]
@@ -134,6 +214,84 @@ def is_admin():
         return False
 
 
+def list_devices():
+    """USB devices Windows sees, driver and all. libusb only sees WinUSB ones."""
+    if not supported():
+        return []
+    try:
+        return _list_devices()
+    except Exception:
+        return []
+
+
+def _list_devices():
+    from ctypes import wintypes as w
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", ctypes.c_ulong), ("Data2", ctypes.c_ushort),
+                    ("Data3", ctypes.c_ushort), ("Data4", ctypes.c_ubyte * 8)]
+
+    class DevInfo(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_ulong), ("ClassGuid", GUID),
+                    ("DevInst", ctypes.c_ulong), ("Reserved", ctypes.c_void_p)]
+
+    setup = ctypes.WinDLL("setupapi", use_last_error=True)
+    get_list = setup.SetupDiGetClassDevsW
+    get_list.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint]
+    get_list.restype = ctypes.c_void_p
+    enum = setup.SetupDiEnumDeviceInfo
+    enum.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(DevInfo)]
+    enum.restype = w.BOOL
+    prop = setup.SetupDiGetDeviceRegistryPropertyW
+    prop.argtypes = [ctypes.c_void_p, ctypes.POINTER(DevInfo), ctypes.c_ulong, ctypes.c_void_p,
+                     ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]
+    prop.restype = w.BOOL
+    destroy = setup.SetupDiDestroyDeviceInfoList
+    destroy.argtypes = [ctypes.c_void_p]
+    status_of = ctypes.WinDLL("cfgmgr32", use_last_error=True).CM_Get_DevNode_Status
+    status_of.argtypes = [ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                          ctypes.c_ulong, ctypes.c_ulong]
+    status_of.restype = ctypes.c_ulong
+
+    info = get_list(None, "USB", None, 0x2 | 0x4)  # present, all classes
+    if not info or info == ctypes.c_void_p(-1).value:
+        return []
+    out = []
+    try:
+        index = 0
+        while True:
+            data = DevInfo()
+            data.cbSize = ctypes.sizeof(DevInfo)
+            if not enum(info, index, ctypes.byref(data)):
+                break
+            index += 1
+            hwids = _reg_prop(prop, info, data, 1)  # SPDRP_HARDWAREID, multi-sz
+            if not hwids:
+                continue
+            name = (_reg_prop(prop, info, data, 0) or [""])[0]
+            service = (_reg_prop(prop, info, data, 4) or [""])[0]
+            st, problem = ctypes.c_ulong(), ctypes.c_ulong()
+            code = 0
+            if status_of(ctypes.byref(st), ctypes.byref(problem), data.DevInst, 0) == 0 \
+                    and st.value & 0x400:  # DN_HAS_PROBLEM
+                code = int(problem.value)
+            out.append({"name": name, "hwids": hwids, "service": service, "problem": code})
+    finally:
+        destroy(info)
+    return out
+
+
+def _reg_prop(prop, info, data, kind):
+    cap = 4096
+    buf = ctypes.create_unicode_buffer(cap // 2)
+    got = ctypes.c_ulong()
+    if not prop(info, ctypes.byref(data), kind, None, ctypes.cast(buf, ctypes.c_void_p),
+                cap, ctypes.byref(got)) or not got.value:
+        return []
+    raw = ctypes.string_at(ctypes.addressof(buf), got.value)
+    return [part for part in raw.decode("utf-16-le", "replace").split("\x00") if part]
+
+
 def _system32(exe):
     return str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / exe)
 
@@ -161,15 +319,15 @@ def _sign(d):
           "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], "Signing the driver", env)
 
 
-def _force_install(inf):
-    """Puts the driver on every plugged-in cable, even over a driver Windows ranks higher."""
+def _force_install(inf, hwids):
+    """Puts the driver on the bridge part of a plugged-in cable."""
     from ctypes import wintypes
     fn = ctypes.WinDLL("newdev", use_last_error=True).UpdateDriverForPlugAndPlayDevicesW
     fn.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
                    ctypes.POINTER(wintypes.BOOL)]
     fn.restype = wintypes.BOOL
     installed, reboot, errors = [], False, []
-    for hwid in hardware_ids():
+    for hwid in hwids:
         need_reboot = wintypes.BOOL(False)
         if fn(None, hwid, str(inf), INSTALLFLAG_FORCE, ctypes.byref(need_reboot)):
             installed.append(hwid)
@@ -181,30 +339,71 @@ def _force_install(inf):
     return installed, reboot, errors
 
 
+def _powershell(script, what):
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in ("PSMODULEPATH", "PSMODULEANALYSISCACHEPATH")}
+    return _run([_system32(r"WindowsPowerShell\v1.0\powershell.exe"), "-NoProfile", "-NonInteractive",
+                  "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], what, env)
+
+
+def _remove_old_packages():
+    """Drops driver packages this app published before. The first ones matched
+    the whole cable, which makes Windows stop a USB-C bridge cable."""
+    try:
+        out = _powershell(
+            "Get-WindowsDriver -Online | Where-Object { $_.ProviderName -eq 'PS5 Cable' } "
+            "| ForEach-Object { $_.Driver }",
+            "Looking for the previous driver")
+    except DriverError:
+        return []
+    names = [line.strip() for line in out.splitlines() if line.strip().lower().endswith(".inf")]
+    for name in names:
+        try:
+            _run([_system32("pnputil.exe"), "/delete-driver", name, "/uninstall", "/force"],
+                 "Removing the previous driver")
+        except DriverError:
+            pass
+    if names:
+        subprocess.run([_system32("pnputil.exe"), "/scan-devices"],
+                       capture_output=True, creationflags=CREATE_NO_WINDOW)
+    return names
+
+
 def install():
     """Signs and installs the driver. Needs administrator rights."""
     if not supported():
         raise DriverError("Only Windows needs a driver for the cable.")
     if not is_admin():
         raise DriverError("Installing a driver needs administrator rights.")
+    present = list_devices()
+    removed = _remove_old_packages()
+    hwids = inf_hwids(present)
     d = driver_dir()
     shutil.rmtree(d, ignore_errors=True)
     d.mkdir(parents=True)
     inf = d / INF_NAME
-    inf.write_bytes(make_inf().encode("ascii"))
+    inf.write_bytes(make_inf(hwids=hwids).encode("ascii"))
     _sign(d)
     _run([_system32("pnputil.exe"), "/add-driver", str(inf)], "Adding the driver to Windows")
-    installed, reboot, errors = _force_install(inf)
+    installed, reboot, errors = _force_install(inf, hwids)
     if errors and not installed:
         raise DriverError("Windows would not put the driver on the cable: " + "; ".join(errors))
-    if installed:
-        msg = "USB driver installed on the cable."
+    if removed:
+        msg = ("Repaired the cable's driver. The earlier one was installed on the whole "
+               "device, which makes Windows stop a USB-C cable. Unplug the cable and plug "
+               "it back in.")
+    elif installed:
+        msg = ("USB driver installed on the bridge part of the cable. If the PS5 still "
+               "doesn't show up, unplug the cable and plug it back in.")
     else:
-        msg = ("USB driver added to Windows. It goes on the cable as soon as the cable is "
-               "plugged into this PC; if it doesn't, plug the cable in and install again.")
+        msg = ("USB driver added. It only applies to a bridge cable (a chip in the middle, "
+               "such as the Prolific PL27A1). A normal USB-C to USB-C cable never shows up, "
+               "because the PS5 and the PC are both USB hosts.")
     if reboot:
         msg += " Windows asks for a restart to finish."
-    return {"ok": True, "on_cable": bool(installed), "reboot": reboot, "message": msg}
+    return {"ok": True, "on_cable": bool(installed), "repaired": bool(removed),
+            "reboot": reboot, "message": msg}
 
 
 def run_elevated_child(result_path):
@@ -261,10 +460,16 @@ def install_elevated(timeout=300):
             raise DriverError(f"Could not start the installer: {ctypes.FormatError()}")
         kernel32.WaitForSingleObject(sei.hProcess, int(timeout * 1000))
         kernel32.CloseHandle(sei.hProcess)
+        # The installer's launcher can exit a moment before the result is written.
+        for _ in range(30):
+            if result.is_file():
+                break
+            time.sleep(0.1)
         try:
             out = json.loads(result.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            raise DriverError("The driver installer stopped without saying why.")
+            raise DriverError("The driver installer closed before it finished. Unplug the "
+                              "cable, plug it back in, and click Install driver again.")
         if not out.get("ok"):
             raise DriverError(out.get("message") or "Installing the driver failed.")
         return out

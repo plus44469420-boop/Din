@@ -38,6 +38,7 @@ enum {
 /* Known bridge chips: vendor, product, name, nominal USB speed in Mbps. */
 #define ULINK_BRIDGES                                  \
   X(0x067b, 0x27a1, "Prolific PL27A1", 5000)           \
+  X(0x067b, 0x27a7, "Prolific PL27A1", 5000)           \
   X(0x067b, 0x25a1, "Prolific PL25A1", 480)
 
 /* Prolific "QuickLink" feature bits (Linux drivers/net/usb/plusb.c). */

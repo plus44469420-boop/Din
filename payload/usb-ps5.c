@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -62,6 +63,7 @@ typedef struct {
   void *h;
   uint8_t ep_in;
   uint8_t ep_out;
+  int iface;
 } bridge_t;
 
 /* libusb's LIBUSB_ERROR_TIMEOUT, and the same code in Sony's 0x8024xxxx form. */
@@ -103,36 +105,62 @@ load(void) {
   return 0;
 }
 
-/* Reads interface 0's bulk endpoints from the configuration descriptor. */
+/* The bridge interface's bulk endpoints. These cables are composite: interface
+ * 0 is the bridge and another interface is a mass-storage "easy transfer"
+ * drive, which also has bulk endpoints and is not the link. */
 static int
 find_endpoints(bridge_t *d) {
-  uint8_t cfg[512];
-  int len, in_iface0 = 0;
+  uint8_t cfg[1024];
+  int len, cur = -1, alt = 0, class = 0, best = -1;
+  uint8_t in = 0, out = 0, best_in = 0, best_out = 0;
 
   len = U.ControlTransfer(d->h, 0x80, 6, 0x0200, 0, cfg, sizeof cfg, 1000);
   if(len < 9) {
     plat_log("usb: GET_DESCRIPTOR(config) failed: %d", len);
     return -1;
   }
-  for(int i = 0; i + 2 <= len && cfg[i] >= 2; i += cfg[i]) {
-    if(cfg[i + 1] == 4 && i + 4 <= len) {
-      in_iface0 = cfg[i + 2] == 0 && cfg[i + 3] == 0;
-    } else if(cfg[i + 1] == 5 && in_iface0 && i + 4 <= len && (cfg[i + 3] & 3) == 2) {
+  for(int i = 0; i + 2 <= len && cfg[i] >= 2 && i + cfg[i] <= len; i += cfg[i]) {
+    if(cfg[i + 1] == 4 && cfg[i] >= 6) {
+      if(best < 0 && cur >= 0 && alt == 0 && class != 0x08 && in && out) {
+        best = cur;
+        best_in = in;
+        best_out = out;
+      }
+      cur = cfg[i + 2];
+      alt = cfg[i + 3];
+      class = cfg[i + 5];
+      in = out = 0;
+    } else if(cfg[i + 1] == 5 && cur >= 0 && alt == 0 && cfg[i] >= 4 && (cfg[i + 3] & 3) == 2) {
       if(cfg[i + 2] & 0x80) {
-        d->ep_in = cfg[i + 2];
+        in = cfg[i + 2];
       } else {
-        d->ep_out = cfg[i + 2];
+        out = cfg[i + 2];
       }
     }
   }
-  return d->ep_in && d->ep_out ? 0 : -1;
+  if(best < 0 && cur >= 0 && alt == 0 && class != 0x08 && in && out) {
+    best = cur;
+    best_in = in;
+    best_out = out;
+  }
+  if(best < 0) {
+    return -1;
+  }
+  d->iface = best;
+  d->ep_in = best_in;
+  d->ep_out = best_out;
+  return 0;
 }
+
+static int g_found_unusable;
 
 static int
 open_bridge(bridge_t *d, const char **name) {
   void **list = NULL;
   ssize_t n = U.GetDeviceList(&list);
   int rc = -1;
+
+  g_found_unusable = 0;
 
   for(ssize_t i = 0; i < n && rc; i++) {
     usbd_device_desc_t desc;
@@ -146,22 +174,24 @@ open_bridge(bridge_t *d, const char **name) {
       }
       if(U.Open(list[i], &d->h)) {
         plat_log("usb: found %s but could not open it", BRIDGES[b].name);
-        break;
-      }
-      if(U.KernelDriverActive && U.DetachKernelDriver && U.KernelDriverActive(d->h, 0) == 1) {
-        U.DetachKernelDriver(d->h, 0);
-      }
-      if(U.ClaimInterface(d->h, 0) && !(U.SetConfiguration && !U.SetConfiguration(d->h, 1) &&
-                                         !U.ClaimInterface(d->h, 0))) {
-        plat_log("usb: %s: could not claim interface 0", BRIDGES[b].name);
-        U.Close(d->h);
+        g_found_unusable = 1;
         break;
       }
       if(find_endpoints(d)) {
-        plat_log("usb: %s: no bulk endpoints", BRIDGES[b].name);
-        if(U.ReleaseInterface) {
-          U.ReleaseInterface(d->h, 0);
-        }
+        plat_log("usb: %s: no bridge endpoints", BRIDGES[b].name);
+        g_found_unusable = 1;
+        U.Close(d->h);
+        break;
+      }
+      if(U.KernelDriverActive && U.DetachKernelDriver &&
+         U.KernelDriverActive(d->h, d->iface) == 1) {
+        U.DetachKernelDriver(d->h, d->iface);
+      }
+      if(U.ClaimInterface(d->h, d->iface) &&
+         !(U.SetConfiguration && !U.SetConfiguration(d->h, 1) &&
+           !U.ClaimInterface(d->h, d->iface))) {
+        plat_log("usb: %s: could not claim interface %d", BRIDGES[b].name, d->iface);
+        g_found_unusable = 1;
         U.Close(d->h);
         break;
       }
@@ -228,14 +258,24 @@ usb_thread(void *arg) {
     ulink_t l = {ps5_recv, ps5_send, &d, NULL};
 
     if(open_bridge(&d, &l.name)) {
+      if(g_found_unusable) {
+        static time_t last;
+        time_t now = time(NULL);
+
+        if(now - last >= 8) {
+          last = now;
+          plat_notify("PS5 Cable: USB cable found, but it would not open");
+        }
+      }
       sleep(1);
       continue;
     }
-    plat_log("usb: %s ready (in %#x, out %#x)", l.name, d.ep_in, d.ep_out);
+    plat_notify("PS5 Cable: USB cable plugged in (%s)", l.name);
+    plat_log("usb: %s ready (interface %d, in %#x, out %#x)", l.name, d.iface, d.ep_in, d.ep_out);
     ulink_session(&l, a->port, a->banner);
-    plat_log("usb: %s link ended", l.name);
+    plat_notify("PS5 Cable: USB cable unplugged");
     if(U.ReleaseInterface) {
-      U.ReleaseInterface(d.h, 0);
+      U.ReleaseInterface(d.h, d.iface);
     }
     U.Close(d.h);
     sleep(1);
