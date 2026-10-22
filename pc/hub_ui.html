@@ -983,7 +983,7 @@ function usbDeviceList() {
 
 async function installDriver(btn) {
   btn.disabled = true;
-  btn.textContent = "Installing… approve the Windows prompt";
+  btn.textContent = "Installing… choose Yes, then wait";
   try {
     const r = await api("POST", "/api/usb/install-driver", {});
     app.usbScan = { ...r.usb, at: Date.now() };

@@ -978,6 +978,19 @@ def idle_watchdog(hub):
 
 
 def main(argv=None):
+    # A windowed build started with the admin prompt can lose --install-driver
+    # from sys.argv. The command line Windows actually passed still has it.
+    if argv is None and os.name == "nt" and "--install-driver" not in sys.argv:
+        try:
+            recovered = windriver.windows_argv()
+        except OSError:
+            recovered = None
+        if recovered and "--install-driver" in recovered:
+            # pythonw's command line is `pythonw hub.py --install-driver RESULT`.
+            # The frozen app's is `PS5 Cable.exe --install-driver RESULT`.
+            if not str(recovered[0]).startswith("-"):
+                recovered = recovered[1:]
+            argv = recovered
     p = argparse.ArgumentParser(description=APP_NAME)
     p.add_argument("--port", type=int, default=0, help="local UI port (default: random)")
     p.add_argument("--no-browser", action="store_true", help="do not open a window")

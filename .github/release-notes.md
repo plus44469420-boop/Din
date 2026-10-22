@@ -1,4 +1,6 @@
-**If a USB-C cable installed its driver and then Windows stopped the device:** click **Install driver** again and replug the cable. The driver has to go on the bridge part of the cable; on the whole device, Windows stops it. A normal USB-C to USB-C cable (no chip in the middle) still cannot connect the PS5. The PS5 now shows a message when the cable is plugged in and when a transfer starts.
+**If Install driver said it closed before it finished:** that was the app giving up when the Windows admin prompt closed, while the installer was still running. This build waits for the installer itself. Click **Install driver**, choose **Yes**, and leave it until the message changes. If it still fails, the message includes the last line of `C:\ProgramData\PS5 Cable\driver.log`.
+
+**If a USB-C cable installed its driver and then Windows stopped the device:** click **Install driver** again and replug the cable. The driver has to go on the bridge part of the cable; on the whole device, Windows stops it. A normal USB-C to USB-C cable (no chip in the middle) still cannot connect the PS5. The PS5 shows a message when the cable is plugged in and when a transfer starts.
 
 File transfer between a PC and a jailbroken PS5 over **one USB cable**: a USB bridge ("data link") cable with a Prolific **PL27A1** chip, with USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A ends. No Ethernet, router or Wi-Fi.
 

@@ -14,6 +14,7 @@ Installing needs administrator rights: the app starts itself elevated with
 
 import base64
 import ctypes
+import errno
 import json
 import os
 import re
@@ -406,16 +407,142 @@ def install():
             "reboot": reboot, "message": msg}
 
 
+def installer_log_path():
+    base = os.environ.get("ProgramData") or tempfile.gettempdir()
+    return Path(base) / "PS5 Cable" / "driver.log"
+
+
+def _log_tail():
+    try:
+        text = installer_log_path().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1][:300] if lines else ""
+
+
 def run_elevated_child(result_path):
-    """Entry point of the elevated copy of the app (--install-driver RESULT)."""
+    """Entry point of the elevated copy of the app (--install-driver RESULT).
+
+    Writes its pid to RESULT.started before doing anything slow, and the
+    outcome to RESULT. The app that asked waits on those files: the process
+    handle from the admin prompt exits before this copy does.
+    """
+    import faulthandler
+    import traceback
+
+    log_path = installer_log_path()
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log = open(log_path, "a", encoding="utf-8")
+    except OSError:
+        log = None
+    if log:
+        log.write(f"\n--- install {time.strftime('%H:%M:%S')} ---\n")
+        log.flush()
+        faulthandler.enable(log)
+    if result_path:
+        try:
+            marker = Path(str(result_path) + ".started")
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(str(os.getpid()), encoding="utf-8")
+        except OSError as e:
+            if log:
+                log.write(f"could not write the start marker: {e}\n")
+                log.flush()
     try:
         result = install()
         code = 0
-    except Exception as e:  # reported to the app that asked, not shown here
-        result, code = {"ok": False, "message": str(e)}, 1
+    except Exception:
+        detail = traceback.format_exc()
+        if log:
+            log.write(detail)
+            log.flush()
+        result, code = {"ok": False, "message": detail.strip().splitlines()[-1][:500]}, 1
     if result_path:
-        Path(result_path).write_text(json.dumps(result), encoding="utf-8")
+        try:
+            Path(result_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(result_path).write_text(json.dumps(result), encoding="utf-8")
+        except OSError as e:
+            if log:
+                log.write(f"could not write the result: {e}\n")
+                log.flush()
+            code = 1
+    if log:
+        log.close()
     return code
+
+
+def pid_alive(pid):
+    """False when `pid` is gone. A process this user isn't allowed to open still counts as alive."""
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except OSError as e:
+            return e.errno == errno.EPERM
+        return True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if handle:
+        kernel32.CloseHandle(handle)
+        return True
+    return ctypes.get_last_error() == 5  # access denied
+
+
+def wait_for_result(result_path, timeout=180, startup_grace=60, interval=0.2, alive=None):
+    """Waits until the elevated installer writes `result_path`.
+
+    The process handle from the Windows admin prompt exits as soon as the
+    elevated copy has been started, so this watches the result file and the
+    pid written beside it instead of that handle.
+    """
+    alive = alive or pid_alive
+    result_path, started_path = Path(result_path), Path(str(result_path) + ".started")
+    deadline = time.monotonic() + timeout
+    pid = None
+
+    def read_result():
+        if not result_path.is_file() or result_path.stat().st_size == 0:
+            return None
+        try:
+            return json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    while time.monotonic() < deadline:
+        found = read_result()
+        if found is not None:
+            return found
+        if pid is None and started_path.is_file():
+            try:
+                pid = int(started_path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                pid = None
+        if pid is not None and not alive(pid):
+            time.sleep(0.5)
+            found = read_result()
+            if found is not None:
+                return found
+            break
+        if pid is None and time.monotonic() > deadline - timeout + startup_grace:
+            break
+        time.sleep(interval)
+    detail = _log_tail()
+    extra = f" {detail}" if detail else f" The log is {installer_log_path()}."
+    if pid is None:
+        raise DriverError("Windows didn't start the driver installer. Click Install driver "
+                          "and choose Yes on the admin prompt." + extra)
+    try:
+        still_running = alive(pid)
+    except OSError:
+        still_running = False
+    if still_running:
+        raise DriverError("The driver installer is taking too long. Leave this window open "
+                          "and click Install driver once more." + extra)
+    raise DriverError("The driver installer closed before it finished." + extra)
 
 
 def _shell_execute_info():
@@ -431,14 +558,47 @@ def _shell_execute_info():
     return ShellExecuteInfo
 
 
-def install_elevated(timeout=300):
-    """Runs the install in an elevated copy of this app (UAC prompt) and returns its result."""
+def windows_argv():
+    """Arguments Windows actually passed to this process, without the program name.
+
+    A windowed build (no console) started from the admin prompt can lose those
+    arguments from sys.argv. The command line itself still has them. None off Windows.
+    """
+    if os.name != "nt":
+        return None
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    shell32.CommandLineToArgvW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    kernel32.GetCommandLineW.restype = ctypes.c_wchar_p
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    argc = ctypes.c_int()
+    argv = shell32.CommandLineToArgvW(kernel32.GetCommandLineW(), ctypes.byref(argc))
+    if not argv:
+        return None
+    try:
+        return [argv[i] for i in range(1, argc.value)]
+    finally:
+        kernel32.LocalFree(ctypes.cast(argv, ctypes.c_void_p))
+
+
+def install_elevated(timeout=300, startup_grace=120):
+    """Runs the install in an elevated copy of this app (UAC prompt) and returns its result.
+
+    The process handle from the admin prompt exits as soon as the elevated copy
+    has been created. Waiting on that handle reports failure while the installer
+    is still running, so this waits on the result file the elevated copy writes.
+    """
     if not supported():
         raise DriverError("Only Windows needs a driver for the cable.")
     if is_admin():
         return install()
-    tmp = Path(tempfile.mkdtemp(prefix="ps5cable-driver-"))
-    result = tmp / "result.json"
+    # ProgramData, not a temp dir: the elevated copy creates the folder, and
+    # this process only reads it. Deleting a temp dir when the prompt's process
+    # exits used to remove the result out from under the real installer.
+    base = Path(os.environ.get("ProgramData") or tempfile.gettempdir()) / "PS5 Cable"
+    result = base / f"install-{os.urandom(8).hex()}.json"
     if getattr(sys, "frozen", False):
         exe, args = sys.executable, ["--install-driver", str(result)]
     else:
@@ -446,32 +606,23 @@ def install_elevated(timeout=300):
         exe = str(pyw if pyw.is_file() else sys.executable)
         args = [str(Path(__file__).resolve().with_name("hub.py")), "--install-driver", str(result)]
     info = _shell_execute_info()
-    sei = info(cbSize=ctypes.sizeof(info), fMask=0x40,  # SEE_MASK_NOCLOSEPROCESS
-               lpVerb="runas", lpFile=exe, lpParameters=subprocess.list2cmdline(args), nShow=0)
+    sei = info(cbSize=ctypes.sizeof(info), fMask=0, lpVerb="runas", lpFile=exe,
+               lpParameters=subprocess.list2cmdline(args),
+               lpDirectory=str(Path(exe).resolve().parent), nShow=1)
     shell32 = ctypes.WinDLL("shell32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    if not shell32.ShellExecuteExW(ctypes.byref(sei)):
+        if ctypes.get_last_error() == ERROR_CANCELLED:
+            raise DriverError("Cancelled: Windows needs your OK (the admin prompt) to "
+                              "install the driver.")
+        raise DriverError(f"Could not start the installer: {ctypes.FormatError()}")
     try:
-        if not shell32.ShellExecuteExW(ctypes.byref(sei)):
-            if ctypes.get_last_error() == ERROR_CANCELLED:
-                raise DriverError("Cancelled: Windows needs your OK (the admin prompt) to "
-                                  "install the driver.")
-            raise DriverError(f"Could not start the installer: {ctypes.FormatError()}")
-        kernel32.WaitForSingleObject(sei.hProcess, int(timeout * 1000))
-        kernel32.CloseHandle(sei.hProcess)
-        # The installer's launcher can exit a moment before the result is written.
-        for _ in range(30):
-            if result.is_file():
-                break
-            time.sleep(0.1)
-        try:
-            out = json.loads(result.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            raise DriverError("The driver installer closed before it finished. Unplug the "
-                              "cable, plug it back in, and click Install driver again.")
-        if not out.get("ok"):
-            raise DriverError(out.get("message") or "Installing the driver failed.")
-        return out
+        out = wait_for_result(result, timeout=timeout, startup_grace=startup_grace)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        for path in (result, Path(str(result) + ".started")):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    if not out.get("ok"):
+        raise DriverError(out.get("message") or "Installing the driver failed.")
+    return out
