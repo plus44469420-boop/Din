@@ -1,5 +1,6 @@
 *.elf
 payload/ps5cable-host
+payload/.deps/
 __pycache__/
 dist/
 converter/target/

@@ -86,6 +86,12 @@ Then plug the cable into the PS5. The payload finds it within a second, and the 
    - Click **Send to PS5 →**, or just drag the selection from the left pane onto the right one.
 5. The **Transfers** panel shows each job's progress, speed and ETA, with a Cancel button. Folders are copied with everything inside.
 
+### Download from a link
+
+On the PS5 pane, **From a link** takes an address you paste — one file, or a page that links to files. This PC reads that page and lists the file addresses it finds. Tick the ones you want. The PS5 downloads them itself, over its own internet connection (Wi-Fi), straight into the folder you have open. The USB cable only carries the address and the progress, so the file is not saved on the PC first.
+
+The PS5 has to be online. A link the console cannot reach will fail. **Skip / resume existing** continues a partial file and skips one that is already the full size. Load the `ps5cable.elf` from this version; an older payload does not know this command.
+
 Going the other way works the same way: select files on the PS5 side and click **← Copy to PC**, and they land in the folder open on the left.
 
 ### Managing files on the PS5
@@ -151,6 +157,11 @@ On Linux and macOS the command line is `./ps5-cable <command>`; on Windows run i
    # download from the PS5
    python pc/ps5cable.py get /data/homebrew/PPSA01234 D:\Backup
 
+   # the PS5 downloads a link itself (nothing is saved on the PC first)
+   python pc/ps5cable.py fetch https://example.com/file.zip /data/homebrew
+   python pc/ps5cable.py fetch --find https://example.com/page /data/homebrew
+   python pc/ps5cable.py fetch --resume https://example.com/file.zip /data/homebrew
+
    # browse and manage files
    python pc/ps5cable.py ls /data
    python pc/ps5cable.py df /data
@@ -180,13 +191,15 @@ Useful places on the PS5: `/data` is internal storage that your File Manager can
 The payload uses [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk). v0.44 or newer is needed for firmware 13.60 kernel offsets.
 
 ```sh
-sudo apt-get install clang-18 lld-18 llvm-18          # Debian/Ubuntu or WSL
+sudo apt-get install clang-18 lld-18 llvm-18 make pkg-config xz-utils ca-certificates curl python3
 wget https://github.com/ps5-payload-dev/sdk/releases/download/v0.44/ps5-payload-sdk.zip
 sudo unzip -d /opt ps5-payload-sdk.zip
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 
 make -C payload                                       # -> payload/ps5cable.elf
 ```
+
+The first payload build also compiles libcurl and mbedTLS (see `payload/build-ps5-curl.sh`) so the console can download https links, and embeds a CA bundle. That result is cached in `payload/.deps`.
 
 The converter needs Rust (stable, 1.85 or newer):
 
@@ -196,7 +209,7 @@ converter/target/release/ps5cable-convert image "D:\Games\PPSA01234" --format ff
 converter/target/release/ps5cable-convert help                # every command and option
 ```
 
-`make -C payload host` builds the same server for your PC, with a stand-in for the USB cable (`-C host:port`, a TCP connection that carries the same bulk transfers). The end-to-end tests and the app tests run every request through the real USB link code on both sides over that stand-in:
+`make -C payload host` builds the same server for your PC, with a stand-in for the USB cable (`-C host:port`, a TCP connection that carries the same bulk transfers). It needs the libcurl development files (`libcurl4-openssl-dev` on Debian/Ubuntu, `libcurl-devel` on Fedora). The end-to-end tests and the app tests run every request through the real USB link code on both sides over that stand-in:
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -206,7 +219,7 @@ To build `PS5 Cable.exe` (CI does the same on `windows-latest`), run this on Win
 
 ```sh
 pip install pyinstaller -r pc/requirements.txt
-pyinstaller --onefile --noconsole --name "PS5 Cable" --paths pc --collect-all libusb_package --hidden-import usb.backend.libusb1 --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
+pyinstaller --onefile --noconsole --name "PS5 Cable" --paths pc --collect-all libusb_package --hidden-import usb.backend.libusb1 --hidden-import linkfind --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 ```
 
 Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publish them as a GitHub release, with `.github/release-notes.md` as the description.
@@ -222,7 +235,7 @@ Pushing a `v*` tag makes CI build the Windows, Linux and macOS packages and publ
 
 ## How it works
 
-The payload serves a small file protocol: requests and responses with a fixed 24-byte header, followed by raw file bytes for uploads and downloads ([`payload/proto.h`](payload/proto.h)). It listens only on the console's loopback address, so nothing on the PS5's network can reach it.
+The payload serves a small file protocol: requests and responses with a fixed 24-byte header, followed by raw file bytes for uploads and downloads ([`payload/proto.h`](payload/proto.h)). A download link is one more request: the PC sends the address, and the PS5 saves the file from the network. The server listens only on the console's loopback address, so nothing on the PS5's network can reach it. The download itself uses the console's own internet connection.
 
 The USB link carries that protocol between the two ends of the bridge cable ([`payload/usblink.h`](payload/usblink.h)). On the PS5 the payload opens the bridge through the system's `libSceUsbd` library. On the PC, `pc/usblink.py` opens it with pyusb/libusb and serves a local port that the app and command line connect to. Each connection becomes a channel on the cable, so several transfers run in parallel over one cable. Every USB transfer is one frame: a 12-byte header (`PU`, type, channel, length) and up to 256 KiB of data.
 

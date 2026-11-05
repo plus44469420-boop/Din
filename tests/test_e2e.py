@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -244,6 +245,106 @@ class ServerTest(unittest.TestCase):
             c.get_file(str(self.remote / "frames.bin"), str(self.tmp / "back.bin"))
         self.assertEqual((self.remote / "frames.bin").read_bytes(), data)
         self.assertEqual((self.tmp / "back.bin").read_bytes(), data)
+
+    def test_ps5_downloads_a_link_itself(self):
+        data = b"abcdefghijklmnopqrstuvwxyz" * 4000
+        httpd = _LinkServer(data)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            dest = self.remote / "saved.bin"
+            with self.conn() as c:
+                written, final = c.fetch(str(dest), base + "/go", headers="Referer: http://example.test/page")
+            self.assertEqual(dest.read_bytes(), data)
+            self.assertEqual((written, final), (len(data), len(data)))
+            self.assertIn("http://example.test/page", [r.get("referer") for r in httpd.seen])
+
+            partial = self.remote / "partial.bin"
+            partial.write_bytes(data[:1000])
+            before = len(httpd.seen)
+            with self.conn() as c:
+                c.fetch(str(partial), base + "/file.bin", offset=1000)
+            self.assertEqual(partial.read_bytes(), data)
+            ranged = [r.get("range") for r in httpd.seen[before:]]
+            self.assertTrue(any(r and r.startswith("bytes=1000-") for r in ranged))
+
+            missing = self.remote / "nope.bin"
+            with self.conn() as c:
+                with self.assertRaisesRegex(ps5cable.RemoteError, "404"):
+                    c.fetch(str(missing), base + "/missing")
+                self.assertFalse(missing.exists())
+                self.assertEqual(c.ping()[0], ps5cable.PROTO_VER)
+                with self.assertRaisesRegex(ps5cable.RemoteError, "http"):
+                    c.fetch(str(self.remote / "bad.bin"), "file:///etc/passwd")
+
+            (self.remote / "cli").mkdir()
+            rc, out = run_cli("fetch", "--resume", base + "/file.bin", str(self.remote / "cli"))
+            self.assertEqual(rc, 0, out)
+            self.assertEqual((self.remote / "cli" / "file.bin").read_bytes(), data)
+            rc, out = run_cli("fetch", "--resume", base + "/file.bin", str(self.remote / "cli"))
+            self.assertEqual(rc, 0, out)
+            self.assertIn("Skipped 1", out)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+
+class _LinkHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self._reply(head=True)
+
+    def do_GET(self):
+        self._reply(head=False)
+
+    def _reply(self, head):
+        self.server.seen.append({
+            "path": self.path,
+            "range": self.headers.get("Range"),
+            "referer": self.headers.get("Referer"),
+        })
+        if self.path == "/go":
+            self.send_response(302)
+            self.send_header("Location", "/file.bin")
+            self.end_headers()
+            return
+        if self.path != "/file.bin":
+            self.send_error(404)
+            return
+        data = self.server.data
+        start, end = 0, len(data) - 1
+        status = 200
+        rng = self.headers.get("Range")
+        if rng and rng.startswith("bytes="):
+            spec = rng[6:].split("-", 1)
+            if spec[0]:
+                start = int(spec[0])
+            if len(spec) > 1 and spec[1]:
+                end = int(spec[1])
+            end = min(end, len(data) - 1)
+            status = 206
+        chunk = data[start:end + 1]
+        self.send_response(status)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(len(chunk)))
+        self.send_header("Content-Disposition", 'attachment; filename="file.bin"')
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        self.end_headers()
+        if not head:
+            self.wfile.write(chunk)
+
+    def log_message(self, fmt, *args):
+        return
+
+
+class _LinkServer(ThreadingHTTPServer):
+    def __init__(self, data):
+        super().__init__(("127.0.0.1", 0), _LinkHandler)
+        self.data = data
+        self.seen = []
 
 
 class NoCableTest(unittest.TestCase):

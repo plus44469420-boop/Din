@@ -20,6 +20,8 @@
 #define P5CX_PROTO_VER    1
 #define P5CX_PORT         9113
 #define P5CX_MAX_PATH     4096
+/* dest + NUL + url + optional headers, for CMD_FETCH. pathlen is 16-bit. */
+#define P5CX_MAX_MSG      32768
 #define P5CX_MAX_SPEEDTEST (4ULL << 30)
 
 enum {
@@ -38,6 +40,9 @@ enum {
   CMD_COPY     = 13, /* path = "src\0dst", a=offset, b=max bytes (0 = all)
                         -> a=bytes copied, b=source size */
   CMD_DU       = 14, /* -> a=total bytes, b=files, mode=folders */
+  CMD_FETCH    = 15, /* path = "dest\\0url" or "dest\\0url\\0headers".
+                        a = resume offset. Two responses: accepted, then done.
+                        The PS5 downloads the url itself. */
 };
 
 enum {

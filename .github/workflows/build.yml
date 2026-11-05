@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 llvm-18
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 llvm-18 make pkg-config xz-utils ca-certificates curl python3 libcurl4-openssl-dev
 
       - name: Install ps5-payload-sdk
         run: |
@@ -57,7 +57,7 @@ jobs:
           mkdir -p "$d/app"
           cp pc/ps5-cable payload/ps5cable.elf README.md LICENSE "$d/"
           cp converter/target/release/ps5cable-convert pc/ps5cable.py pc/usblink.py \
-             pc/convert.py pc/hub.py pc/windriver.py pc/hub_ui.html pc/requirements.txt \
+             pc/convert.py pc/hub.py pc/linkfind.py pc/windriver.py pc/hub_ui.html pc/requirements.txt \
              pc/60-ps5cable.rules "$d/app/"
           tar -C out -czf out/PS5-Cable-Linux.tar.gz PS5-Cable
           tar tzvf out/PS5-Cable-Linux.tar.gz
@@ -93,7 +93,7 @@ jobs:
           mkdir -p "$d/app"
           cp pc/ps5-cable payload/ps5cable.elf README.md LICENSE "$d/"
           cp converter/target/release/ps5cable-convert pc/ps5cable.py pc/usblink.py \
-             pc/convert.py pc/hub.py pc/windriver.py pc/hub_ui.html pc/requirements.txt "$d/app/"
+             pc/convert.py pc/hub.py pc/linkfind.py pc/windriver.py pc/hub_ui.html pc/requirements.txt "$d/app/"
           tar -C out -czf out/PS5-Cable-macOS.tar.gz PS5-Cable
 
       - uses: actions/upload-artifact@v4
@@ -130,7 +130,7 @@ jobs:
         run: |
           pip install pyinstaller -r pc/requirements.txt
           pyinstaller --onefile --noconsole --name "PS5 Cable" --paths pc \
-            --collect-all libusb_package --hidden-import usb.backend.libusb1 \
+            --collect-all libusb_package --hidden-import usb.backend.libusb1 --hidden-import linkfind \
             --add-data "pc/hub_ui.html;." --add-data "payload/ps5cable.elf;." \
             --add-binary "converter/target/release/ps5cable-convert.exe;." pc/hub.py
 
