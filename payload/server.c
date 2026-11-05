@@ -18,6 +18,7 @@
 #include <sys/statvfs.h>
 #include <sys/types.h>
 
+#include "fetch.h"
 #include "platform.h"
 #include "proto.h"
 #include "usblink.h"
@@ -65,7 +66,7 @@ write_full(int fd, const void *buf, size_t len) {
   return 0;
 }
 
-static int
+int
 send_res(int fd, uint8_t kind, uint32_t mode, uint64_t a, uint64_t b) {
   p5cx_res_t res = {
     .status = ST_OK, .kind = kind, .reserved = 0, .mode = mode, .a = a, .b = b,
@@ -78,10 +79,7 @@ send_ok(int fd) {
   return send_res(fd, 0, 0, 0, 0);
 }
 
-static int
-send_err(int fd, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-
-static int
+int
 send_err(int fd, const char *fmt, ...) {
   char msg[P5CX_MAX_PATH + 256];
   p5cx_res_t res = {0};
@@ -154,7 +152,7 @@ mkdir_p(const char *path) {
   return 0;
 }
 
-static int
+int
 mkdir_parent(const char *path) {
   char tmp[P5CX_MAX_PATH];
   char *slash;
@@ -767,13 +765,12 @@ handle_df(int fd, const char *path) {
 static void *
 client_thread(void *arg) {
   int fd = (int)(intptr_t)arg;
-  char path[P5CX_MAX_PATH];
-  uint8_t *buf;
+  uint8_t *buf = NULL;
+  char *msg = NULL;
 
-  if(!(buf = malloc(IO_BUF_SIZE))) {
+  if(!(buf = malloc(IO_BUF_SIZE)) || !(msg = malloc(P5CX_MAX_MSG + 1))) {
     plat_log("client: out of memory");
-    close(fd);
-    return NULL;
+    goto out;
   }
 
   for(;;) {
@@ -787,18 +784,18 @@ client_thread(void *arg) {
       plat_log("client: bad magic, dropping connection");
       break;
     }
-    if(req.pathlen >= sizeof path) {
+    if(req.pathlen > P5CX_MAX_MSG) {
       send_err(fd, "path too long");
       break;
     }
-    if(read_full(fd, path, req.pathlen)) {
+    if(req.pathlen && read_full(fd, msg, req.pathlen)) {
       break;
     }
-    path[req.pathlen] = '\0';
+    msg[req.pathlen] = '\0';
 
     if(req.cmd != CMD_PING && req.cmd != CMD_SHUTDOWN && req.cmd != CMD_SINK &&
-       req.cmd != CMD_SOURCE && path[0] != '/') {
-      if(send_err(fd, "path must be absolute: \"%s\"", path)) {
+       req.cmd != CMD_SOURCE && req.cmd != CMD_FETCH && msg[0] != '/') {
+      if(send_err(fd, "path must be absolute: \"%s\"", msg)) {
         break;
       }
       continue;
@@ -806,18 +803,19 @@ client_thread(void *arg) {
 
     switch(req.cmd) {
     case CMD_PING:     rc = handle_ping(fd); break;
-    case CMD_LIST:     rc = handle_list(fd, path); break;
-    case CMD_STAT:     rc = handle_stat(fd, path); break;
-    case CMD_MKDIR:    rc = handle_mkdir(fd, path); break;
-    case CMD_DELETE:   rc = handle_delete(fd, path, req.flags); break;
-    case CMD_RENAME:   rc = handle_rename(fd, path, req.pathlen); break;
-    case CMD_PUT:      rc = handle_put(fd, path, req.flags, req.a, req.b, buf); break;
-    case CMD_GET:      rc = handle_get(fd, path, req.a, buf); break;
-    case CMD_DF:       rc = handle_df(fd, path); break;
+    case CMD_LIST:     rc = handle_list(fd, msg); break;
+    case CMD_STAT:     rc = handle_stat(fd, msg); break;
+    case CMD_MKDIR:    rc = handle_mkdir(fd, msg); break;
+    case CMD_DELETE:   rc = handle_delete(fd, msg, req.flags); break;
+    case CMD_RENAME:   rc = handle_rename(fd, msg, req.pathlen); break;
+    case CMD_PUT:      rc = handle_put(fd, msg, req.flags, req.a, req.b, buf); break;
+    case CMD_GET:      rc = handle_get(fd, msg, req.a, buf); break;
+    case CMD_DF:       rc = handle_df(fd, msg); break;
     case CMD_SINK:     rc = handle_sink(fd, req.a, buf); break;
     case CMD_SOURCE:   rc = handle_source(fd, req.a, buf); break;
-    case CMD_COPY:     rc = handle_copy(fd, path, req.pathlen, req.a, req.b, buf); break;
-    case CMD_DU:       rc = handle_du(fd, path); break;
+    case CMD_COPY:     rc = handle_copy(fd, msg, req.pathlen, req.a, req.b, buf); break;
+    case CMD_DU:       rc = handle_du(fd, msg); break;
+    case CMD_FETCH:    rc = handle_fetch(fd, msg, req.pathlen, req.flags, req.a); break;
     case CMD_SHUTDOWN:
       send_ok(fd);
       plat_notify("PS5 Cable stopped");
@@ -831,6 +829,8 @@ client_thread(void *arg) {
     }
   }
 
+out:
+  free(msg);
   free(buf);
   close(fd);
   return NULL;

@@ -101,7 +101,6 @@
   .cable.ok { border-color: #1f6b3a; } .cable.ok svg { color: var(--ok); }
   .cable.warn { border-color: #6b4a12; } .cable.warn svg { color: var(--warn); } .cable.warn .txt small { color: #fcd34d; }
   .cable.bad { border-color: #7f1d1d; } .cable.bad svg { color: var(--bad); } .cable.bad .txt small { color: #fca5a5; }
-  .modal.wide { width: 640px; }
   .facts { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; margin: 0; }
   .facts dt { color: var(--muted); }
   .facts dd { margin: 0; overflow-wrap: anywhere; }
@@ -308,6 +307,22 @@
   .job-top .dir { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #1b2a44; color: #9cc2ff; font-weight: 700; }
   .job-top .dir.down { background: #1d3326; color: #86efac; }
   .job-top .dir.on-ps5 { background: #2a1f3d; color: #d8b4fe; }
+  .job-top .dir.fetch { background: #2a2414; color: #fcd34d; }
+  .modal.wide { width: min(680px, calc(100vw - 40px)); }
+  .linkdlg { display: grid; gap: 10px; }
+  .linkdlg .hint { margin: 0; color: var(--muted); font-size: 13px; }
+  .linkbox {
+    width: 100%; min-height: 88px; resize: vertical; font: 12.5px/1.45 var(--mono);
+    background: #0d121b; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  }
+  .linklist { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
+  .linklist label {
+    display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+    column-gap: 8px; align-items: center; font-size: 13px;
+  }
+  .linklist label input { grid-row: 1 / span 2; }
+  .linklist label small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .linklist p { margin: 0; color: var(--muted); font-size: 12.5px; white-space: pre-line; }
   .job .meta { display: flex; gap: 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .job .meta .state-done { color: var(--ok); }
   .job .meta .state-failed { color: var(--bad); }
@@ -474,14 +489,14 @@ function toast(msg, kind = "") {
   setTimeout(() => t.remove(), kind === "err" ? 7000 : 3500);
 }
 
-function modal({ title, text, input, okText = "OK", danger = false, extra }) {
+function modal({ title, text, input, okText = "OK", danger = false, extra, wide = false }) {
   return new Promise((resolve) => {
     const field = input !== undefined ? el("input", { type: "text", value: input, spellcheck: "false" }) : null;
     const close = (v) => { bg.remove(); resolve(v); };
     const ok = el("button", { class: danger ? "primary danger" : "primary",
       onclick: () => close(field ? field.value : true) }, okText);
     const bg = el("div", { class: "modal-bg", onclick: (e) => { if (e.target === bg) close(null); } },
-      el("div", { class: "modal" },
+      el("div", { class: "modal" + (wide ? " wide" : "") },
         el("h3", {}, title), text ? el("p", {}, text) : null, extra || null, field,
         el("div", { class: "row" }, el("button", { onclick: () => close(null) }, "Cancel"), ok)));
     document.body.append(bg);
@@ -529,6 +544,9 @@ class Pane {
     const tb = el("div", { class: "toolbar" },
       el("button", { class: "icon", title: "Up one level", html: ICONS.up, onclick: () => this.parent && this.load(this.parent) }),
       this.crumbsEl, this.filterEl,
+      this.isLocal ? null : el("button", {
+        title: "Paste a link. This PC finds the file and the PS5 downloads it over Wi-Fi.",
+        html: "From a link", onclick: () => openLinkDownload() }),
       this.isLocal ? null : el("button", { title: "Folders where PS5 tools look for games and packages",
         html: ICONS.folder.replace("<svg", '<svg style="color:#f7c948"') + "Game folders",
         onclick: (e) => { e.stopPropagation(); openGameFolders(e.currentTarget); } }),
@@ -1545,6 +1563,54 @@ async function pollConvert() {
   } catch (e) { cvTimer = setTimeout(pollConvert, 3000); }
 }
 
+// ---------------------------------------------------------------- links
+
+async function openLinkDownload() {
+  if (!app.connected) { toast("Connect the PS5 first", "err"); return; }
+  if (!remote.path) { toast("Open the folder on the PS5 where the files should go", "err"); return; }
+  const box = el("textarea", { class: "linkbox", spellcheck: "false",
+    placeholder: "Paste a download link, or a page that lists them.\nOne link per line is fine." });
+  const list = el("div", { class: "linklist" });
+  const found = [];
+  const findBtn = el("button", { onclick: async () => {
+    findBtn.disabled = true;
+    list.replaceChildren();
+    found.length = 0;
+    try {
+      const d = await api("POST", "/api/links/find", { text: box.value });
+      if (!d.links.length) {
+        list.append(el("p", {}, (d.errors || []).join("\n") || "No file links found. Paste the file's own address."));
+        return;
+      }
+      for (const link of d.links) {
+        const cb = el("input", { type: "checkbox", checked: true });
+        cb.checked = true;
+        link._cb = cb;
+        found.push(link);
+        list.append(el("label", {}, cb,
+          el("span", {}, link.name + (link.size ? " · " + human(link.size) : "")),
+          el("small", { title: link.url }, link.url)));
+      }
+      if (d.errors && d.errors.length) list.append(el("p", {}, d.errors.join("\n")));
+    } catch (e) { toast(e.message, "err"); }
+    finally { findBtn.disabled = false; }
+  }}, "Find links");
+  const ok = await modal({
+    title: "Download on the PS5", wide: true, okText: "Download on PS5",
+    extra: el("div", { class: "linkdlg" },
+      el("p", { class: "hint" }, `Saves into ${remote.path}. The PS5 downloads the file over Wi-Fi. The cable only sends the link, so nothing is kept on this PC.`),
+      box, el("div", { class: "row", style: "justify-content:flex-start" }, findBtn), list),
+  });
+  if (!ok) return;
+  const links = found.filter((l) => l._cb.checked).map(({ url, name, size, headers }) => ({ url, name, size, headers }));
+  if (!links.length) { toast("Find the links first, and leave the ones you want ticked", "err"); return; }
+  try {
+    await api("POST", "/api/links/fetch", { dest: remote.path, links, resume: $("opt-resume").checked });
+    $("transfers").classList.remove("collapsed");
+    pollJobs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
 // ---------------------------------------------------------------- transfers
 
 async function startTransfer(direction) {
@@ -1566,8 +1632,10 @@ function jobCard(j) {
   const names = j.sources.map((s) => s.split(/[\\/]/).filter(Boolean).pop() || s);
   const title = names.length > 1 ? `${names[0]} + ${names.length - 1} more` : names[0];
   const up = j.direction === "upload", onPs5 = j.direction === "copy" || j.direction === "move";
-  const label = { upload: "PC → PS5", download: "PS5 → PC", copy: "Copy on PS5", move: "Move on PS5" }[j.direction];
-  const stateText = { planning: "Scanning…", running: `${pct.toFixed(1)}%`, done: "Done", failed: "Finished with errors", cancelled: "Cancelled" }[j.state];
+  const label = { upload: "PC → PS5", download: "PS5 → PC", copy: "Copy on PS5", move: "Move on PS5", fetch: "Link → PS5" }[j.direction];
+  const stateText = j.state === "running"
+    ? (j.total ? `${pct.toFixed(1)}%` : "Downloading…")
+    : { planning: "Scanning…", done: "Done", failed: "Finished with errors", cancelled: "Cancelled" }[j.state];
   const meta = el("div", { class: "meta" },
     el("span", { class: `state-${j.state}` }, stateText),
     j.files_total || !j.renamed ? el("span", {}, `${human(j.done)} / ${human(j.total)}`) : null,
@@ -1580,7 +1648,7 @@ function jobCard(j) {
     el("span", { style: "margin-left:auto; overflow:hidden; text-overflow:ellipsis" }, `→ ${j.dest}`));
   const card = el("div", { class: `job ${j.state}` },
     el("div", { class: "job-top" },
-      el("span", { class: "dir" + (up ? "" : onPs5 ? " on-ps5" : " down") }, label),
+      el("span", { class: "dir" + (j.direction === "fetch" ? " fetch" : up ? "" : onPs5 ? " on-ps5" : " down") }, label),
       el("span", { class: "title", title: j.sources.join("\n") }, title),
       (j.state === "running" || j.state === "planning")
         ? el("button", { class: "ghost danger", onclick: () => api("POST", "/api/jobs/cancel", { id: j.id }).catch((e) => toast(e.message, "err")) }, "Cancel")
@@ -1613,10 +1681,11 @@ async function pollJobs() {
     for (const j of jobs) {
       if (["done", "failed", "cancelled"].includes(j.state) && !app.seenDone.has(j.id)) {
         app.seenDone.add(j.id);
-        const onPs5 = j.direction === "copy" || j.direction === "move";
+        const onPs5 = j.direction === "copy" || j.direction === "move" || j.direction === "fetch";
         if (j.state === "done" && j.direction === "move") toast(`Moved ${j.sources.length} item${j.sources.length === 1 ? "" : "s"} to ${j.dest}`, "ok");
+        else if (j.state === "done" && j.direction === "fetch") toast(`Downloaded ${j.files_total} file${j.files_total === 1 ? "" : "s"} onto the PS5`, "ok");
         else if (j.state === "done") toast(`${{ upload: "Sent", download: "Copied", copy: "Copied on the PS5:" }[j.direction]} ${j.files_total} file${j.files_total === 1 ? "" : "s"} (${human(j.total)})`, "ok");
-        else if (j.state === "failed") toast(`${onPs5 ? (j.direction === "move" ? "Move" : "Copy") : "Transfer"} finished with ${j.error_count} error(s)`, "err");
+        else if (j.state === "failed") toast(`${j.direction === "fetch" ? "Download" : onPs5 ? (j.direction === "move" ? "Move" : "Copy") : "Transfer"} finished with ${j.error_count} error(s)`, "err");
         const target = j.direction === "download" ? local : remote;
         target.load(target.path);
         if (onPs5) loadRemotePlaces(true);

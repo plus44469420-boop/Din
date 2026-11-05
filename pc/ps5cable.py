@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import linkfind  # noqa: E402
 import usblink  # noqa: E402
 
 # The payload's file server port on the console's loopback (proto.h).
@@ -34,7 +35,7 @@ PROTO_VER = 1
 
 CMD_PING, CMD_LIST, CMD_STAT, CMD_MKDIR, CMD_DELETE = 1, 2, 3, 4, 5
 CMD_RENAME, CMD_PUT, CMD_GET, CMD_DF, CMD_SHUTDOWN = 6, 7, 8, 9, 10
-CMD_SINK, CMD_SOURCE, CMD_COPY, CMD_DU = 11, 12, 13, 14
+CMD_SINK, CMD_SOURCE, CMD_COPY, CMD_DU, CMD_FETCH = 11, 12, 13, 14, 15
 
 F_RECURSIVE = 1 << 0
 F_MKDIRS = 1 << 1
@@ -248,6 +249,30 @@ class Connection:
                 remaining -= k
                 if progress:
                     progress(k)
+
+    def fetch(self, remote, url, offset=0, headers="", on_start=None):
+        """Tell the PS5 to download `url` itself and save it at `remote`.
+
+        Returns (bytes written this time, final size). `on_start(total, offset)`
+        runs once the console has the file open, before the body arrives.
+        `total` is 0 when the server did not say how big the file is.
+        """
+        if "\0" in remote or "\0" in url or "\0" in (headers or ""):
+            raise ValueError("link or path contains a NUL")
+        raw = remote.encode("utf-8") + b"\0" + url.encode("utf-8")
+        if headers:
+            raw += b"\0" + headers.encode("utf-8")
+        if len(raw) > 32768:
+            raise ValueError("link is too long")
+        self.sock.settimeout(60)
+        self._request(CMD_FETCH, raw, F_MKDIRS, offset)
+        _, _, total, start = self._response()
+        if on_start:
+            on_start(total, start)
+        # The body can take a long time. Cancel closes this socket.
+        self.sock.settimeout(None)
+        _, _, written, final = self._response()
+        return written, final
 
 
 class Progress:
@@ -748,6 +773,204 @@ def _cli_transfer(args, upload, sources, dest):
     return 1 if failures else 0
 
 
+def download_links(host, port, items, resume=True, on_bytes=None, on_file=None,
+                   on_size=None, cancel=None):
+    """Send each link to the PS5, which downloads it onto `item["dest"]`.
+
+    An item is {url, dest, name, size, headers}. `size` may be None.
+    Returns a list of (item, error). A file already the expected size is
+    skipped when `resume` is set.
+    """
+    failures = []
+    conn = None
+
+    def live():
+        nonlocal conn
+        if conn is None:
+            conn = Connection(host, port)
+        return conn
+
+    def drop():
+        nonlocal conn
+        if conn is not None:
+            conn.close()
+            conn = None
+
+    try:
+        for item in items:
+            err = None
+            skipped = False
+            try:
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("cancelled")
+                skipped = _fetch_item(live, drop, host, port, item, resume,
+                                      on_bytes, on_size, cancel)
+            except Exception as e:
+                err = e
+                drop()
+                failures.append((item, e))
+            item["_skipped"] = skipped and err is None
+            if on_file:
+                on_file(item, err)
+            if isinstance(err, RemoteError) and "unknown command" in str(err):
+                break
+            if isinstance(err, Cancelled):
+                break
+    finally:
+        drop()
+    return failures
+
+
+def _fetch_item(live, drop, host, port, item, resume, on_bytes, on_size, cancel):
+    c = live()
+    st = c.stat(item["dest"])
+    if st is not None and st[0] != KIND_FILE:
+        raise RemoteError(f"{item['dest']}: not a file")
+    have = st[1] if st else 0
+    expected = item.get("size")
+    if resume and expected and have == expected:
+        return True
+    offset = have if resume and have and (not expected or have < expected) else 0
+    box = {}
+    stop = threading.Event()
+
+    def on_start(total, start):
+        if on_size and total:
+            on_size(max(0, total - start))
+            box["known"] = True
+        last = {"n": start}
+
+        def poll():
+            while not stop.wait(0.35):
+                if cancel is not None and cancel.is_set():
+                    drop()
+                    return
+                try:
+                    with Connection(host, port, timeout=5) as s:
+                        cur = s.stat(item["dest"])
+                except OSError:
+                    continue
+                if not cur or cur[0] != KIND_FILE:
+                    continue
+                if cur[1] > last["n"] and on_bytes:
+                    on_bytes(cur[1] - last["n"])
+                last["n"] = cur[1]
+
+        box["last"] = last
+        box["thread"] = threading.Thread(target=poll, daemon=True)
+        box["thread"].start()
+
+    try:
+        written, _final = c.fetch(item["dest"], item["url"], offset,
+                                  item.get("headers") or "", on_start)
+    finally:
+        stop.set()
+        thread = box.get("thread")
+        if thread:
+            thread.join(timeout=2)
+    if on_bytes and "last" in box:
+        try:
+            with Connection(host, port, timeout=5) as s:
+                cur = s.stat(item["dest"])
+        except OSError:
+            cur = None
+        if cur and cur[0] == KIND_FILE and cur[1] > box["last"]["n"]:
+            on_bytes(cur[1] - box["last"]["n"])
+    if on_size and not box.get("known"):
+        on_size(written)
+    return False
+
+
+def _fetch_hint(err):
+    text = str(err)
+    if "unknown command" in text:
+        return text + " — load the new ps5cable.elf; this copy can't download links yet"
+    return text
+
+
+def cmd_fetch(args):
+    if args.find:
+        if len(args.paths) != 2:
+            sys.exit("fetch --find needs a page address and a folder on the PS5")
+        page, dest = args.paths
+        found = linkfind.resolve(page)
+        if not found["links"]:
+            sys.exit("No download links found.\n" + "\n".join(found["errors"]))
+        for err in found["errors"]:
+            print(err, file=sys.stderr)
+        links = found["links"]
+    else:
+        if len(args.paths) < 2:
+            sys.exit("fetch needs a link and a destination on the PS5")
+        *urls, dest = args.paths
+        links = []
+        for url in urls:
+            try:
+                url = linkfind.check_url(url)
+            except ValueError as e:
+                sys.exit(str(e))
+            # Learn the final address and size here. The PS5 then downloads it.
+            found = linkfind.resolve(url)
+            if found["links"]:
+                links.extend(found["links"])
+            else:
+                for err in found["errors"]:
+                    print(err, file=sys.stderr)
+                links.append({"url": url, "name": linkfind.name_from_url(url),
+                              "size": None, "headers": ""})
+        linkfind.unique_names(links)
+
+    with connect(args) as c:
+        st = c.stat(dest)
+        if args.find:
+            if st is None:
+                c.mkdir(dest)
+                st = (KIND_DIR, 0, 0)
+            if st[0] != KIND_DIR:
+                sys.exit(f"{dest} is not a folder on the PS5")
+        elif st is not None and st[0] not in (KIND_DIR, KIND_FILE):
+            sys.exit(f"{dest} is not a file or folder on the PS5")
+        elif st is None and (len(links) > 1 or dest.endswith("/")):
+            c.mkdir(dest)
+            st = (KIND_DIR, 0, 0)
+    dest_is_dir = st is not None and st[0] == KIND_DIR
+    if dest_is_dir:
+        items = [{**link, "dest": remote_join(dest, link["name"])} for link in links]
+    elif len(links) != 1:
+        sys.exit(f"{dest} is not a folder")
+    else:
+        items = [{**links[0], "dest": dest}]
+
+    print(f"PS5 downloading {len(items)} file(s) into {dest}")
+    for link in links:
+        size = f" ({human(link['size'])})" if link.get("size") else ""
+        print(f"  {link['name']}{size}")
+        print(f"    {link['url']}")
+
+    total = {"n": 0}
+
+    def on_size(n):
+        total["n"] += n
+
+    progress = Progress(0, len(items))
+
+    def on_bytes(n):
+        progress.total = total["n"]
+        progress.add(n)
+
+    failures = download_links(args.host, args.port, items, resume=args.resume,
+                              on_bytes=on_bytes, on_size=on_size,
+                              on_file=lambda item, err: progress.file_finished())
+    progress.total = total["n"]
+    progress.finish()
+    skipped = sum(1 for item in items if item.get("_skipped"))
+    if skipped:
+        print(f"Skipped {skipped} already complete")
+    for item, err in failures:
+        print(f"FAILED {item['name']}: {_fetch_hint(err)}", file=sys.stderr)
+    return 1 if failures else 0
+
+
 def cmd_put(args):
     return _cli_transfer(args, True, args.local, args.remote)
 
@@ -786,6 +1009,16 @@ def build_parser():
     s.add_argument("--resume", action="store_true",
                    help="skip files already complete and continue partial ones")
     s.set_defaults(func=cmd_put)
+
+    s = sub.add_parser("fetch", help="send links to the PS5 so it downloads them "
+                                    "(the file is saved on the console, not on this PC)")
+    s.add_argument("--find", action="store_true",
+                   help="read a page and download the file links on it")
+    s.add_argument("--resume", action="store_true",
+                   help="skip a file that is already complete and continue a partial one")
+    s.add_argument("paths", nargs="+",
+                   help="link [link ...] destination, or with --find: page destination")
+    s.set_defaults(func=cmd_fetch)
 
     s = sub.add_parser("get", help="download a PS5 file/folder")
     s.add_argument("remote")

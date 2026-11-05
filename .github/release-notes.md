@@ -1,8 +1,10 @@
+**Download from a link.** In the PS5 pane, **From a link** takes an address (or a page that lists files). This PC finds the file addresses and sends them to the console. The PS5 downloads them over Wi-Fi into the folder you have open; the cable only carries the address and the progress. Load the `ps5cable.elf` from this build. The command line is `fetch`, and `fetch --find` reads a page.
+
 **If Install driver said it closed before it finished:** that was the app giving up when the Windows admin prompt closed, while the installer was still running. This build waits for the installer itself. Click **Install driver**, choose **Yes**, and leave it until the message changes. If it still fails, the message includes the last line of `C:\ProgramData\PS5 Cable\driver.log`.
 
 **If a USB-C cable installed its driver and then Windows stopped the device:** click **Install driver** again and replug the cable. The driver has to go on the bridge part of the cable; on the whole device, Windows stops it. A normal USB-C to USB-C cable (no chip in the middle) still cannot connect the PS5. The PS5 shows a message when the cable is plugged in and when a transfer starts.
 
-File transfer between a PC and a jailbroken PS5 over **one USB cable**: a USB bridge ("data link") cable with a Prolific **PL27A1** chip, with USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A ends. No Ethernet, router or Wi-Fi.
+File transfer between a PC and a jailbroken PS5 over **one USB cable**: a USB bridge ("data link") cable with a Prolific **PL27A1** chip, with USB-C ⇄ USB-C, USB-A ⇄ USB-C or USB-A ⇄ USB-A ends. The cable link needs no Ethernet, router, or Wi-Fi. A download from a link uses the PS5's own internet connection.
 
 ## Downloads
 
@@ -41,7 +43,7 @@ The [README](https://github.com/plus44469420-boop/Din#readme) has the full guide
   - **game image**: `.ffpkg`, `.exfat`, `.ffpfs` or compressed `.ffpfsc`, with AMPR LZ4 asset packs;
   - **back to a folder**.
   - Converted files can go to the PS5 in one click.
-- **Command line** (`./ps5-cable <command>` on Linux and macOS, `python pc/ps5cable.py` from the source): `put`, `get`, `ls`, `cp`, `mv`, `rm`, `du`, `df`, `status`, `speedtest`.
+- **Command line** (`./ps5-cable <command>` on Linux and macOS, `python pc/ps5cable.py` from the source): `put`, `get`, `fetch`, `ls`, `cp`, `mv`, `rm`, `du`, `df`, `status`, `speedtest`.
 
 ## Notes
 

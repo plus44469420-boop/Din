@@ -9,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -281,6 +283,57 @@ class HubTest(unittest.TestCase):
             self.assertEqual(tree_digest(other / "PPSA05555"), want)
         finally:
             shutil.rmtree(other, ignore_errors=True)
+
+    def test_fetch_link_lands_on_the_ps5(self):
+        body = b"from-the-page" * 50
+        page = b'<html><body><a href="/got.bin">get</a><a href="/about">no</a></body></html>'
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                self._reply(True)
+
+            def do_GET(self):
+                self._reply(False)
+
+            def _reply(self, head):
+                if self.path == "/page":
+                    payload, ctype = page, "text/html"
+                elif self.path == "/got.bin":
+                    payload, ctype = body, "application/octet-stream"
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                if not head:
+                    self.wfile.write(payload)
+
+            def log_message(self, fmt, *args):
+                return
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        dest = self.tmp / "linked"
+        dest.mkdir()
+        try:
+            found = self.api("POST", "/api/links/find",
+                             {"text": f"http://127.0.0.1:{httpd.server_address[1]}/page"})
+            self.assertEqual([link["name"] for link in found["links"]], ["got.bin"])
+            job = self.wait_job(self.api("POST", "/api/links/fetch", {
+                "dest": str(dest), "links": found["links"], "resume": True})["id"])
+            self.assertEqual(job["state"], "done", job)
+            self.assertEqual((dest / "got.bin").read_bytes(), body)
+            self.assertEqual(job["done"], len(body))
+            again = self.wait_job(self.api("POST", "/api/links/fetch", {
+                "dest": str(dest), "links": found["links"], "resume": True})["id"])
+            self.assertEqual((again["state"], again["skipped"]), ("done", 1), again)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
 
     def test_local_list(self):
         d = self.tmp / "ll"

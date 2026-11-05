@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import convert  # noqa: E402
+import linkfind  # noqa: E402
 import ps5cable  # noqa: E402
 import usblink  # noqa: E402
 import windriver  # noqa: E402
@@ -99,7 +100,7 @@ class Settings:
 class Job:
     def __init__(self, kind, sources, dest):
         self.id = uuid.uuid4().hex[:12]
-        self.kind = kind  # "upload", "download", or "copy"/"move" within the PS5
+        self.kind = kind  # "upload", "download", "fetch", or "copy"/"move" within the PS5
         self.upload = kind == "upload"
         self.sources = list(sources)
         self.dest = dest
@@ -267,6 +268,60 @@ class Hub:
             self.jobs[job.id] = job
         threading.Thread(target=self._run_remote_copy, args=(job,), daemon=True).start()
         return job
+
+    def start_fetch(self, links, dest, resume):
+        """The PS5 downloads each link itself into `dest`."""
+        job = Job("fetch", [link["name"] for link in links], dest)
+        job.links = links
+        with self.jobs_lock:
+            self.jobs[job.id] = job
+        threading.Thread(target=self._run_fetch, args=(job, resume), daemon=True).start()
+        return job
+
+    def _run_fetch(self, job, resume):
+        host, port = self.target()
+        try:
+            items = [{
+                "url": link["url"],
+                "dest": posixpath.join(job.dest, link["name"]),
+                "name": link["name"],
+                "size": link.get("size"),
+                "headers": link.get("headers") or "",
+            } for link in job.links]
+            with job.lock:
+                job.files_total = len(items)
+                job.state = "running"
+
+            def on_size(n):
+                with job.lock:
+                    job.total += n
+
+            def on_file(item, err):
+                if err is not None and job.cancel.is_set():
+                    err = ps5cable.Cancelled("cancelled")
+                elif isinstance(err, ps5cable.RemoteError) and "unknown command" in str(err):
+                    err = ps5cable.RemoteError(
+                        str(err) + " — load the new ps5cable.elf; this copy can't download links yet")
+                job.file_done((item["name"],), None if item.get("_skipped") else err)
+                if item.get("_skipped"):
+                    with job.lock:
+                        job.skipped += 1
+
+            ps5cable.download_links(host, port, items, resume=resume, on_bytes=job.add_bytes,
+                                    on_file=on_file, on_size=on_size, cancel=job.cancel)
+            with job.lock:
+                if job.cancel.is_set():
+                    job.state = "cancelled"
+                else:
+                    job.state = "failed" if job.errors else "done"
+        except Exception as e:
+            with job.lock:
+                job.errors.append({"file": "", "error": str(e)})
+                job.state = "cancelled" if job.cancel.is_set() else "failed"
+        finally:
+            with job.lock:
+                job.finished = time.time()
+            self.places_cache = None
 
     def _run_remote_copy(self, job):
         host, port = self.target()
@@ -877,6 +932,56 @@ def _path_list(args, key):
     return paths
 
 
+def api_links_find(hub, args):
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ApiError("Paste a link first")
+    if len(text) > 100_000:
+        raise ApiError("That is too much text")
+    return linkfind.resolve(text)
+
+
+def api_links_fetch(hub, args):
+    """Resolve is done; these addresses are sent to the PS5 to download."""
+    _require(args, "dest", "links")
+    if not hub.status().get("connected"):
+        raise ApiError("PS5 not connected", HTTPStatus.CONFLICT)
+    dest = posixpath.normpath(str(args["dest"]))
+    if not dest.startswith("/") or dest.startswith("//"):
+        raise ApiError("destination must be an absolute PS5 path")
+    parts = [p for p in dest.split("/") if p]
+    if parts and parts[0] in SYSTEM_ROOTS:
+        raise ApiError("That folder is part of the PS5 system software", HTTPStatus.FORBIDDEN)
+    raw = args["links"]
+    if not isinstance(raw, list) or not raw or len(raw) > linkfind.MAX_LINKS:
+        raise ApiError(f"Choose between 1 and {linkfind.MAX_LINKS} links")
+    links = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ApiError("each link needs an address and a file name")
+        try:
+            url = linkfind.check_url(item.get("url") or "")
+        except ValueError as e:
+            raise ApiError(str(e))
+        name = linkfind.safe_name(item.get("name") or linkfind.name_from_url(url))
+        size = item.get("size")
+        if isinstance(size, float) and size.is_integer() and size >= 0:
+            size = int(size)
+        if size is not None and (not isinstance(size, int) or size < 0):
+            size = None
+        links.append({
+            "url": url, "name": name, "size": size,
+            "headers": linkfind.clean_headers(item.get("headers") or ""),
+        })
+    linkfind.unique_names(links)
+    with hub.conn() as c:
+        st = c.stat(dest)
+        if st is None or st[0] != ps5cable.KIND_DIR:
+            raise ApiError(f"No such folder on the PS5: {dest}", HTTPStatus.NOT_FOUND)
+    resume = bool(args.get("resume", hub.settings.get("resume")))
+    return hub.start_fetch(links, dest, resume).to_dict()
+
+
 def api_transfer(hub, args):
     _require(args, "direction", "sources", "dest")
     if args["direction"] not in ("upload", "download"):
@@ -936,6 +1041,8 @@ ROUTES = {
     ("POST", "/api/remote/copy"): api_remote_copy,
     ("POST", "/api/remote/size"): api_remote_size,
     ("POST", "/api/transfer"): api_transfer,
+    ("POST", "/api/links/find"): api_links_find,
+    ("POST", "/api/links/fetch"): api_links_fetch,
     ("POST", "/api/jobs/cancel"): api_cancel,
     ("POST", "/api/jobs/clear"): api_clear,
     ("POST", "/api/quit"): api_quit,
